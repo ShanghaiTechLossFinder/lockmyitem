@@ -55,6 +55,6 @@
 
 ## 重要说明
 
-- 地图是小程序内静态校园地图视图，适合地点选择和按地点找物，不做实时导航。
+- 地图 tab 通过 `web-view` 内嵌上海科技大学官方地图 `https://map.shanghaitech.edu.cn/?sessionid=`。正式上线前需要在微信公众平台配置业务域名 `map.shanghaitech.edu.cn`。
 - 第一版通知采用站内消息；真实微信订阅消息可在 `sendThanks` 和 `createComment` 后追加发送逻辑。
 - 页面默认走本地 `utils/store.js`，这样无云环境也能演示；正式版可将 store 方法逐步替换为 `wx.cloud.callFunction({ name: 'lostfound', data: { action, ... } })`。
