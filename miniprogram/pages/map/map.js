@@ -1,5 +1,5 @@
 Page({
   data: {
-    officialMapUrl: 'https://map.shanghaitech.edu.cn/?sessionid='
+    officialMapUrl: 'https://map.shanghaitech.edu.cn/'
   }
 });
