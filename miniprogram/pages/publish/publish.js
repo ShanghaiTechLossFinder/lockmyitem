@@ -1,6 +1,6 @@
 const { CATEGORIES } = require('../../utils/constants');
 const { createItem, searchLocations, classifyByText, findPotentialMatches } = require('../../utils/store');
-const { nearestCampusLocation, nearestCampusLocations } = require('../../utils/locations');
+const { CAMPUS_CENTER, nearestCampusLocations } = require('../../utils/locations');
 
 function initialForm() {
   return {
@@ -87,15 +87,24 @@ Page({
       type: 'gcj02',
       isHighAccuracy: true,
       success: (res) => {
-        const candidates = nearestCampusLocations(res, 3);
+        const candidates = nearestCampusLocations(res, 6);
         const nearest = candidates[0];
+        const accuracy = Math.round(Number(res.accuracy) || 0);
+        const isLowAccuracy = accuracy >= 60 || nearest.distance > 80;
+        const tip = isLowAccuracy
+          ? `定位精度约 ${accuracy || '未知'}m，已预选 ${nearest.name}，请在候选地点中确认`
+          : `已按当前位置匹配到 ${nearest.name}，可在下方切换候选地点`;
         this.setData({ locationCandidates: candidates });
-        this.setLocation(nearest, `已按当前位置匹配到 ${nearest.name}，可在下方切换候选地点`);
+        this.setLocation(nearest, tip);
       },
       fail: () => {
-        const nearest = nearestCampusLocation();
-        this.setData({ locationCandidates: [nearest] });
-        this.setLocation(nearest, `未获得定位权限，已默认填充 ${nearest.name}`);
+        this.setData({
+          locationCandidates: nearestCampusLocations(CAMPUS_CENTER, 6),
+          locationTip: '未获得定位权限，请手动选择上科大校内地点',
+          'form.locationId': '',
+          locationKeyword: '',
+          locations: searchLocations()
+        });
       },
       complete: () => {
         this.setData({ locating: false });

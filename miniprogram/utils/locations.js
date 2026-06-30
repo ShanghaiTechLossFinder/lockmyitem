@@ -412,12 +412,19 @@ function nearestCampusLocations(coords = CAMPUS_CENTER, limit = 3) {
     latitude: Number(coords.latitude) || CAMPUS_CENTER.latitude,
     longitude: Number(coords.longitude) || CAMPUS_CENTER.longitude
   };
+  const accuracy = Number(coords.accuracy) || 0;
   return LOCATIONS
     .filter((location) => location.enabled)
-    .map((location) => ({
-      ...location,
-      distance: Math.round(distanceMeters(current, location))
-    }))
+    .map((location) => {
+      const distance = Math.round(distanceMeters(current, location));
+      const withinAccuracy = accuracy > 0 && distance <= Math.max(accuracy, 35);
+      return {
+        ...location,
+        distance,
+        withinAccuracy,
+        distanceText: withinAccuracy ? '定位范围内' : `${distance}m`
+      };
+    })
     .sort((a, b) => a.distance - b.distance)
     .slice(0, limit);
 }
