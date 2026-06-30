@@ -97,9 +97,18 @@ async function listLocations(event) {
 }
 
 async function classifyImage(event) {
-  // Production hook: call Tencent Cloud/Baidu/Ali image recognition here with event.fileId.
-  // The text fallback keeps the MVP deterministic until API credentials are configured.
-  return ok(classifyByText(event.hint || ''));
+  // Production hook:
+  // 1. Use a vision model to describe the image, e.g. colors, object type, accessories, text/logo.
+  // 2. Store imageEmbedding for visual similarity search.
+  // 3. Store semanticEmbedding for description similarity search.
+  // The fallback keeps the MVP deterministic until API credentials are configured.
+  const classification = classifyByText(event.hint || '');
+  return ok({
+    ...classification,
+    visualDescription: event.hint || '',
+    imageEmbedding: [],
+    semanticEmbedding: []
+  });
 }
 
 async function createItem(event, context) {
