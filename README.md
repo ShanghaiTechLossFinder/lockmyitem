@@ -92,6 +92,25 @@ wx.getLocation({
 - `SEMANTIC_API_URL`
 - `MODEL_API_KEY`，如模型服务需要鉴权
 
+如果你还没有这两个模型服务，仓库已提供可部署模板：
+
+`model-service/`
+
+部署后把公开 HTTPS 地址填入微信云函数环境变量即可，例如：
+
+```text
+YOLO_API_URL=https://your-model-service.example.com/yolo
+SEMANTIC_API_URL=https://your-model-service.example.com/semantic
+MODEL_API_KEY=你自己设置的共享密钥
+```
+
+这些值的来源：
+
+- `YOLO_API_URL`：你部署 `model-service` 后得到的公开 HTTPS 地址，加 `/yolo`。
+- `SEMANTIC_API_URL`：同一个服务地址，加 `/semantic`。
+- `MODEL_API_KEY`：你自己生成的一串密钥，同时填到 `model-service` 和微信云函数环境变量里。
+- `OPENAI_API_KEY`：只填在 `model-service` 服务器环境变量里，用于语义图像识别，不要放进小程序代码。
+
 调用链路：
 
 1. 小程序上传图片到云存储。

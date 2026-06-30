@@ -7,6 +7,18 @@
 
 两个地址通过微信云函数环境变量配置，密钥通过 `MODEL_API_KEY` 配置。
 
+如果你还没有模型服务，可以使用仓库内的服务模板：
+
+`model-service/`
+
+部署后：
+
+- `YOLO_API_URL` 填 `https://你的域名/yolo`
+- `SEMANTIC_API_URL` 填 `https://你的域名/semantic`
+- `MODEL_API_KEY` 填你自己设置的共享密钥
+
+`OPENAI_API_KEY` 只需要配置在 `model-service` 的服务器环境变量里，用来调用语义识别模型；小程序和微信云函数不应保存这个密钥。
+
 ## 请求格式
 
 云函数会向两个服务都发送同样的 POST JSON：
