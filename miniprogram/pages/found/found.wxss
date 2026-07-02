@@ -1,5 +1,28 @@
-.intro {
-  margin-bottom: 22rpx;
+.found-home {
+  background: #123c3a;
+}
+
+.summary-card {
+  display: flex;
+  align-items: baseline;
+  gap: 14rpx;
+  margin-bottom: 20rpx;
+  padding: 22rpx 24rpx;
+  background: #ffffff;
+  border: 1rpx solid rgba(16, 24, 40, 0.06);
+  border-radius: 8rpx;
+}
+
+.summary-number {
+  color: #0f766e;
+  font-size: 42rpx;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.summary-label {
+  color: #475467;
+  font-size: 26rpx;
 }
 
 .found-card {
@@ -15,7 +38,11 @@
   background: #e7f5f2;
   border-radius: 6rpx;
   font-size: 24rpx;
-  font-weight: 700;
+  font-weight: 800;
+}
+
+.item-copy {
+  min-width: 0;
 }
 
 .title,
@@ -24,12 +51,19 @@
 }
 
 .title {
+  overflow: hidden;
+  color: #111827;
   font-size: 32rpx;
-  font-weight: 700;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .meta {
   margin-top: 8rpx;
-  color: #6b7280;
+  overflow: hidden;
+  color: #667085;
   font-size: 24rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

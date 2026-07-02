@@ -1,5 +1,9 @@
 <view class="page">
-  <view class="section-title">{{form.type === 'lost' ? '发布寻物' : '发布招领'}}</view>
+  <view class="surface-hero publish-hero">
+    <text class="surface-eyebrow">CREATE A CLUE</text>
+    <text class="surface-title">{{form.type === 'lost' ? '发布寻物' : '发布招领'}}</text>
+    <text class="surface-subtitle">上传图片、确认地点，系统会提取标签并提示潜在匹配。</text>
+  </view>
 
   <view class="card">
     <view class="segmented" aria-label="发布类型">

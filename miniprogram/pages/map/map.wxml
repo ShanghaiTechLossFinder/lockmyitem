@@ -1,10 +1,22 @@
 <view class="page">
   <view class="hero lost-hero">
-    <view>
+    <view class="hero-copy">
+      <text class="hero-eyebrow">MATCH REQUESTS</text>
       <text class="hero-title">寻物</text>
-      <text class="hero-subtitle">发布和查看同学正在寻找的物品。</text>
+      <text class="hero-subtitle">发布和查看正在寻找的物品，系统会按图像标签与地点做相似匹配。</text>
     </view>
     <button class="hero-action" bindtap="startPublish">发布寻物</button>
+  </view>
+
+  <view class="stats-row">
+    <view class="stat-card">
+      <text class="stat-value">{{stats.total}}</text>
+      <text class="stat-label">寻找中</text>
+    </view>
+    <view class="stat-card">
+      <text class="stat-value">{{stats.today}}</text>
+      <text class="stat-label">今日新增</text>
+    </view>
   </view>
 
   <scroll-view class="category-bar" scroll-x>
@@ -31,9 +43,9 @@
       </view>
       <text class="item-desc">{{item.description}}</text>
       <view class="item-meta" wx:if="{{item.locationName || item.locationDetail}}">
-        <text>{{item.locationName}}</text>
+        <text>可能地点 · {{item.locationName}}</text>
       </view>
-      <view>
+      <view class="tag-row">
         <text class="tag">{{item.category}}</text>
         <text wx:for="{{item.aiTags}}" wx:key="*this" class="tag light">{{item}}</text>
       </view>
