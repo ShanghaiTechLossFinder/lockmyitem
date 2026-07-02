@@ -2,9 +2,9 @@
   <view class="section-title">{{form.type === 'lost' ? '发布寻物' : '发布招领'}}</view>
 
   <view class="card">
-    <view class="segmented">
-      <view class="{{form.type === 'found' ? 'active' : ''}}" bindtap="setType" data-type="found">我捡到了</view>
-      <view class="{{form.type === 'lost' ? 'active' : ''}}" bindtap="setType" data-type="lost">我丢了</view>
+    <view class="segmented" aria-label="发布类型">
+      <view class="{{form.type === 'found' ? 'active' : ''}}" bindtap="setType" data-type="found" aria-role="button">我捡到了</view>
+      <view class="{{form.type === 'lost' ? 'active' : ''}}" bindtap="setType" data-type="lost" aria-role="button">我丢了</view>
     </view>
 
     <button class="image-picker" bindtap="chooseImage">
@@ -33,26 +33,30 @@
       >{{item}}</view>
     </scroll-view>
 
-    <view class="location-head">
-      <view>
-        <view class="row-label">地点</view>
-        <text class="location-tip">{{locationTip}}</text>
+    <view class="location-panel {{locationState}}">
+      <view class="location-head">
+        <view>
+          <view class="row-label">地点</view>
+          <text class="location-tip">{{locationTip}}</text>
+          <text wx:if="{{locationMeta}}" class="location-meta">{{locationMeta}}</text>
+        </view>
+        <button class="locate-button" loading="{{locating}}" bindtap="detectCampusLocation" aria-label="获取当前位置">{{locating ? '定位中' : '重新定位'}}</button>
       </view>
-      <button class="locate-button" loading="{{locating}}" bindtap="detectCampusLocation">定位</button>
     </view>
     <input class="field" placeholder="搜索上科大校内地点，如 图书馆、食堂、宿舍" value="{{locationKeyword}}" bindinput="searchLocation" />
     <button wx:if="{{form.locationId}}" class="clear-location" bindtap="clearLocation">不选择地点</button>
     <view wx:if="{{locationCandidates.length > 1}}" class="candidate-list">
-      <view
+      <button
         wx:for="{{locationCandidates}}"
         wx:key="_id"
         class="candidate {{form.locationId === item._id ? 'active' : ''}}"
         bindtap="selectLocation"
         data-id="{{item._id}}"
+        aria-label="选择{{item.name}}，{{item.distanceText}}"
       >
         <text>{{item.name}}</text>
         <text>{{item.distanceText}}</text>
-      </view>
+      </button>
     </view>
     <view class="location-list">
       <view

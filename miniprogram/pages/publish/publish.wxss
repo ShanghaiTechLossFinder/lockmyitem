@@ -82,35 +82,75 @@
   font-weight: 700;
 }
 
+.location-panel {
+  margin: 22rpx 0 16rpx;
+  padding: 18rpx;
+  background: #f8fafb;
+  border: 1rpx solid #e5e7eb;
+  border-radius: 8rpx;
+}
+
+.location-panel.ok {
+  background: #e7f5f2;
+  border-color: rgba(15, 118, 110, 0.28);
+}
+
+.location-panel.warn {
+  background: #fff8e6;
+  border-color: #f6d58f;
+}
+
+.location-panel.error {
+  background: #fff1f0;
+  border-color: #fecdca;
+}
+
 .location-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 18rpx;
-  margin-top: 18rpx;
 }
 
 .location-head .row-label {
   margin-top: 0;
+  margin-bottom: 8rpx;
 }
 
 .location-tip {
   display: block;
-  margin-bottom: 12rpx;
   color: #667085;
   font-size: 24rpx;
+  line-height: 1.45;
+}
+
+.location-meta {
+  display: block;
+  margin-top: 8rpx;
+  color: #344054;
+  font-size: 22rpx;
+  line-height: 1.4;
 }
 
 .locate-button {
-  width: 132rpx;
-  height: 58rpx;
+  flex: 0 0 auto;
+  min-width: 148rpx;
+  height: 62rpx;
   margin: 0;
-  padding: 0;
+  padding: 0 18rpx;
   color: #ffffff;
   background: #0f766e;
   border-radius: 8rpx;
   font-size: 24rpx;
-  line-height: 58rpx;
+  line-height: 62rpx;
+}
+
+.locate-button::after,
+.candidate::after,
+.image-picker::after,
+.clear-location::after,
+.ai-result button::after {
+  border: 0;
 }
 
 .ai-result {
@@ -148,25 +188,34 @@
 }
 
 .candidate-list {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12rpx;
   margin-bottom: 16rpx;
-  overflow-x: auto;
-  white-space: nowrap;
 }
 
 .candidate {
-  flex: 0 0 auto;
-  min-width: 190rpx;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  min-height: 96rpx;
+  margin: 0;
   padding: 14rpx 16rpx;
   color: #344054;
   background: #f8fafb;
   border: 1rpx solid #e5e7eb;
   border-radius: 8rpx;
+  font-size: 26rpx;
+  line-height: 1.25;
+  text-align: left;
 }
 
 .candidate text {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .candidate text:last-child {
