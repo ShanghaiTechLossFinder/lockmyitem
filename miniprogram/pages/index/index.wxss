@@ -1,5 +1,5 @@
 .page {
-  padding: 28rpx 22rpx 88rpx;
+  padding: 30rpx 22rpx 88rpx;
   background: #fbfaf6;
 }
 
@@ -37,6 +37,9 @@
 
 .notice-banner {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   height: 184rpx;
   margin-bottom: 28rpx;
   overflow: hidden;
@@ -46,24 +49,26 @@
 }
 
 .notice-image {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0.86;
+  position: relative;
+  flex: 0 0 320rpx;
+  width: 320rpx;
+  height: 156rpx;
+  margin-right: 12rpx;
+  opacity: 0.9;
+  border-radius: 8rpx;
 }
 
 .notice-copy {
   position: relative;
   z-index: 1;
-  max-width: 430rpx;
-  padding: 42rpx 34rpx;
+  min-width: 0;
+  flex: 1;
+  padding: 34rpx 0 34rpx 30rpx;
 }
 
 .notice-title {
   color: #1f6b5d;
-  font-size: 34rpx;
+  font-size: 32rpx;
   font-weight: 900;
   line-height: 1.2;
 }
@@ -71,25 +76,27 @@
 .notice-subtitle {
   margin-top: 14rpx;
   color: #596968;
-  font-size: 28rpx;
+  font-size: 26rpx;
   line-height: 1.35;
 }
 
 .category-bar {
   width: 100%;
-  margin-bottom: 26rpx;
+  margin-bottom: 24rpx;
   white-space: nowrap;
 }
 
 .tag {
-  height: 58rpx;
-  margin-right: 18rpx;
-  padding: 0 24rpx;
+  display: inline-flex;
+  align-items: center;
+  height: 54rpx;
+  margin-right: 14rpx;
+  padding: 0 22rpx;
   color: #5f6767;
   background: transparent;
   border-radius: 999rpx;
-  font-size: 30rpx;
-  line-height: 58rpx;
+  font-size: 28rpx;
+  line-height: 54rpx;
 }
 
 .tag.active {
@@ -142,8 +149,8 @@
 
 .item-row {
   display: flex;
-  gap: 22rpx;
-  padding: 24rpx;
+  gap: 20rpx;
+  padding: 22rpx;
   background: #ffffff;
   border-bottom: 1rpx solid #ece9e2;
 }
@@ -156,9 +163,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 150rpx;
-  width: 150rpx;
-  height: 150rpx;
+  flex: 0 0 136rpx;
+  width: 136rpx;
+  height: 136rpx;
   overflow: hidden;
   color: #2e806f;
   background: #eef5f2;
@@ -186,8 +193,9 @@
 
 .item-title {
   min-width: 0;
+  flex: 1;
   color: #1f2933;
-  font-size: 32rpx;
+  font-size: 31rpx;
   font-weight: 900;
   line-height: 1.28;
 }
@@ -208,7 +216,7 @@
   margin-top: 12rpx;
   overflow: hidden;
   color: #626b70;
-  font-size: 28rpx;
+  font-size: 27rpx;
   line-height: 1.45;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

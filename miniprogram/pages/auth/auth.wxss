@@ -1,37 +1,11 @@
 .auth-page {
   min-height: 100vh;
-  padding: 54rpx 28rpx;
-  background: #EEF5F8;
+  padding: 76rpx 34rpx 48rpx;
+  background: #f4faf8;
 }
 
-.auth-card {
-  position: relative;
-  padding: 44rpx 34rpx 34rpx;
-  overflow: hidden;
-  background: #FFFFFF;
-  border: 1rpx solid #D7E4E8;
-  border-radius: 8rpx;
-  box-shadow: 0 22rpx 48rpx rgba(23, 42, 51, 0.11);
-}
-
-.auth-card::before {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 10rpx;
-  content: "";
-  background: #C4862F;
-}
-
-.auth-card::after {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 10rpx;
-  height: 12rpx;
-  content: "";
-  background: #245B6B;
+.auth-hero {
+  margin-bottom: 42rpx;
 }
 
 .auth-mark,
@@ -42,45 +16,54 @@
 }
 
 .auth-mark {
-  color: #C4862F;
-  font-size: 24rpx;
-  font-weight: 800;
+  color: #c4862f;
+  font-size: 26rpx;
+  font-weight: 900;
 }
 
 .auth-title {
-  margin-top: 18rpx;
-  color: #172A33;
-  font-size: 46rpx;
+  margin-top: 22rpx;
+  color: #172a33;
+  font-size: 48rpx;
   font-weight: 900;
   line-height: 1.18;
 }
 
 .auth-copy {
-  margin-top: 16rpx;
-  color: #61727A;
+  margin-top: 18rpx;
+  color: #61727a;
   font-size: 28rpx;
   line-height: 1.55;
+}
+
+.auth-card {
+  padding: 30rpx;
+  background: #ffffff;
+  border: 1rpx solid #d7e4e8;
+  border-radius: 14rpx;
+  box-shadow: 0 18rpx 42rpx rgba(31, 107, 93, 0.08);
 }
 
 .wechat-button,
 .submit-button {
   width: 100%;
-  height: 82rpx;
-  margin: 30rpx 0 0;
-  border-radius: 8rpx;
+  height: 88rpx;
+  margin: 0;
+  border-radius: 12rpx;
   font-size: 30rpx;
-  font-weight: 800;
-  line-height: 82rpx;
+  font-weight: 900;
+  line-height: 88rpx;
 }
 
 .wechat-button {
   color: #ffffff;
-  background: #245B6B;
+  background: #245b6b;
 }
 
 .submit-button {
-  color: #245B6B;
-  background: #E4F0F2;
+  margin-top: 28rpx;
+  color: #245b6b;
+  background: #e4f0f2;
 }
 
 .wechat-button::after,
@@ -89,27 +72,27 @@
 }
 
 .form-block {
-  margin-top: 24rpx;
+  margin-top: 28rpx;
 }
 
 .field-label {
-  margin-bottom: 10rpx;
-  color: #172A33;
+  margin-bottom: 12rpx;
+  color: #172a33;
   font-size: 26rpx;
-  font-weight: 800;
+  font-weight: 900;
 }
 
 .field,
 .email-row {
-  min-height: 84rpx;
-  background: #F6FAFC;
-  border: 1rpx solid #D7E4E8;
-  border-radius: 8rpx;
+  min-height: 88rpx;
+  background: #f7fbfc;
+  border: 1rpx solid #d7e4e8;
+  border-radius: 12rpx;
 }
 
 .field {
   width: 100%;
-  padding: 0 20rpx;
+  padding: 0 22rpx;
   font-size: 30rpx;
 }
 
@@ -121,15 +104,15 @@
 .email-input {
   min-width: 0;
   flex: 1;
-  height: 84rpx;
-  padding: 0 18rpx;
+  height: 88rpx;
+  padding: 0 22rpx;
   font-size: 30rpx;
 }
 
 .email-domain {
   flex: 0 0 auto;
-  padding-right: 18rpx;
-  color: #245B6B;
-  font-size: 26rpx;
-  font-weight: 800;
+  padding-right: 20rpx;
+  color: #245b6b;
+  font-size: 25rpx;
+  font-weight: 900;
 }

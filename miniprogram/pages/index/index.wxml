@@ -7,11 +7,11 @@
   </view>
 
   <view class="notice-banner" bindtap="startPublish">
-    <image class="notice-image" src="/assets/notice/campus-board.jpg" mode="aspectFill" />
     <view class="notice-copy">
       <text class="notice-title">拾金不昧，传递温暖</text>
       <text class="notice-subtitle">如遇失物，请及时发布招领信息</text>
     </view>
+    <image class="notice-image" src="/assets/notice/campus-board.jpg" mode="aspectFill" />
   </view>
 
   <scroll-view class="category-bar" scroll-x>

@@ -1,9 +1,11 @@
 <view class="auth-page">
-  <view class="auth-card">
+  <view class="auth-hero">
     <text class="auth-mark">上科大失物招领</text>
     <text class="auth-title">先确认你的校内身份</text>
     <text class="auth-copy">第一次使用需要注册。可以微信直接进入，也可以用学校邮箱前缀注册。</text>
+  </view>
 
+  <view class="auth-card">
     <button class="wechat-button" bindtap="useWechatProfile">
       微信直接登录
     </button>
