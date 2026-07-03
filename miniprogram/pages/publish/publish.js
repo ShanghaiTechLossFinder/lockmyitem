@@ -1,6 +1,7 @@
 const { CATEGORIES } = require('../../utils/constants');
 const { createItem, searchLocations, classifyByText, findPotentialMatches } = require('../../utils/store');
 const { CAMPUS_CENTER, nearestCampusLocations } = require('../../utils/locations');
+const { collectIndoorSignals, fuseIndoorLocation } = require('../../utils/indoor-positioning');
 
 const LOCATE_SAMPLE_COUNT = 3;
 const CAMPUS_REJECT_DISTANCE = 1200;
@@ -35,6 +36,7 @@ Page({
     locationTip: '正在定位到上科大校内地点...',
     locationState: 'idle',
     locationMeta: '',
+    indoorMeta: '',
     potentialMatches: [],
     form: initialForm()
   },
@@ -145,7 +147,8 @@ Page({
     this.setData({
       locating: true,
       locationState: 'locating',
-      locationMeta: '将连续采样 3 次，自动选择最可信的位置',
+      locationMeta: '将连续采样 3 次，并尝试采集 Wi-Fi/BLE 室内信号',
+      indoorMeta: '',
       locationTip: '正在获取精准位置...'
     });
     this.collectLocationSamples([], 0);
@@ -199,6 +202,7 @@ Page({
         locationCandidates: nearestCampusLocations(CAMPUS_CENTER, 8),
         locationTip: `当前位置距离上科大约 ${nearest ? nearest.distance : '较远'}m，请确认微信开发者工具或手机定位是否在校内`,
         locationMeta: '未自动填充地点，避免把校外定位误判为校内地点',
+        indoorMeta: '',
         locationState: 'error',
         locating: false,
         'form.locationId': '',
@@ -207,19 +211,40 @@ Page({
       });
       return;
     }
+
+    this.setData({
+      locationCandidates: candidates,
+      locationMeta: `定位精度 ${accuracy || '未知'}m · 正在融合室内 Wi-Fi/BLE 信号`,
+      indoorMeta: '室内信号采集中...'
+    });
+
+    collectIndoorSignals(res).then((signals) => {
+      this.applyFusedLocation(res, candidates, signals);
+    });
+  },
+
+  applyFusedLocation(res, gpsCandidates, indoorSignals) {
+    const candidates = fuseIndoorLocation(gpsCandidates, indoorSignals);
+    const nearest = candidates[0];
+    const accuracy = Math.round(Number(res.accuracy) || 0);
+    const indoorMeta = indoorSignals.tencentReady || indoorSignals.calibrated
+      ? indoorSignals.summary
+      : `${indoorSignals.summary} · 指纹库待采集，当前以 GPS+校内 POI 为主`;
     const shouldAutoSelect = accuracy <= CAMPUS_AUTO_ACCURACY && nearest.distance <= CAMPUS_AUTO_DISTANCE;
     const tip = shouldAutoSelect
       ? `已按当前位置匹配到 ${nearest.name}`
       : `定位结果接近 ${nearest.name}，请在候选地点中确认`;
-    const locationMeta = `定位精度 ${accuracy || '未知'}m · 距离候选点 ${nearest.distance}m`;
+    const signalText = nearest.signalScore ? ` · 室内信号加权 ${nearest.signalScore}` : '';
+    const locationMeta = `定位精度 ${accuracy || '未知'}m · 距离候选点 ${nearest.distance}m${signalText}`;
     this.setData({ locationCandidates: candidates });
     if (shouldAutoSelect) {
-      this.setLocation(nearest, tip, { state: 'ok', meta: locationMeta, locating: false });
+      this.setLocation(nearest, tip, { state: 'ok', meta: locationMeta, indoorMeta, locating: false });
       return;
     }
     this.setData({
       locationTip: tip,
       locationMeta,
+      indoorMeta,
       locationState: 'warn',
       locating: false,
       'form.locationId': '',
@@ -234,6 +259,7 @@ Page({
       locationCandidates: nearestCampusLocations(CAMPUS_CENTER, 8),
       locationState: 'error',
       locationMeta: '可直接搜索或从候选地点中选择',
+      indoorMeta: '',
       locationTip: tip,
       'form.locationId': '',
       locationKeyword: '',
@@ -249,6 +275,7 @@ Page({
       locationTip: tip,
       locationState: options.state || 'ok',
       locationMeta: options.meta || '',
+      indoorMeta: options.indoorMeta || this.data.indoorMeta || '',
       locating: options.locating === undefined ? this.data.locating : options.locating
     }, () => this.refreshPotentialMatches());
   },
@@ -275,6 +302,7 @@ Page({
       locationTip: '可重新定位或手动选择上科大校内地点',
       locationState: 'idle',
       locationMeta: '',
+      indoorMeta: '',
       locationCandidates: [],
       locations: searchLocations()
     });

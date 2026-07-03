@@ -43,6 +43,7 @@
           <view class="row-label">地点</view>
           <text class="location-tip">{{locationTip}}</text>
           <text wx:if="{{locationMeta}}" class="location-meta">{{locationMeta}}</text>
+          <text wx:if="{{indoorMeta}}" class="indoor-meta">{{indoorMeta}}</text>
         </view>
         <button class="locate-button" loading="{{locating}}" bindtap="detectCampusLocation" aria-label="获取当前位置">{{locating ? '定位中' : '重新定位'}}</button>
       </view>

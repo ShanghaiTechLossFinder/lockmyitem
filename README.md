@@ -34,18 +34,25 @@
 - `pages/messages/messages`：消息中心。
 - `pages/me/me`：我的资料、邮箱、我的发布。
 
-## 自动定位与地点库
+## 精准定位与地点库
 
 发布页会调用：
 
 ```js
 wx.getLocation({
   type: 'gcj02',
-  isHighAccuracy: true
+  isHighAccuracy: true,
+  highAccuracyExpireTime: 4000
 })
 ```
 
-定位后会匹配最近的上科大校内地点，并展示最近候选地点供用户切换。
+当前定位链路已经升级为多源融合：
+
+1. 连续调用 3 次微信高精度定位，选取 `距离校内 POI + 定位精度` 综合分最低的一次。
+2. 自动扫描当前 Wi-Fi 信号和附近 BLE 设备，作为室内定位辅助信号。
+3. 若 `miniprogram/utils/indoor-fingerprints.js` 中配置了真实 AP/BLE 指纹，会对对应校内地点加权排序。
+4. 若云函数配置了腾讯室内定位服务，会调用 `resolveTencentIndoor` action，把腾讯室内结果纳入候选地点排序。
+5. 当定位精度足够、最近地点足够近时自动填充；否则展示候选地点，要求用户确认，避免误判。
 
 地点库位于：
 
@@ -64,6 +71,38 @@ wx.getLocation({
 - 学生公寓、教师公寓、体育馆、游泳馆、会议中心、校门
 
 地图显示使用腾讯地图坐标系，代码中已包含 WGS84 到 GCJ-02 的转换逻辑。
+
+### Wi-Fi / BLE / 腾讯室内配置
+
+室内信号采集代码位于：
+
+- `miniprogram/utils/indoor-positioning.js`
+- `miniprogram/utils/indoor-fingerprints.js`
+
+`indoor-fingerprints.js` 默认不写入真实 AP/BLE 数据。比赛现场或校内测试时，可以按地点采集真实信号后填入：
+
+```js
+library: {
+  wifi: [
+    { bssid: 'aa:bb:cc:dd:ee:ff', ssid: 'ShanghaiTech', weight: 32 },
+    { ssidKeyword: 'Library', weight: 16 }
+  ],
+  ble: [
+    { deviceId: 'AA:BB:CC:DD:EE:FF', nameKeyword: 'Library', weight: 28 }
+  ],
+  indoor: { building: '图书馆', floor: '2F' }
+}
+```
+
+腾讯室内定位通过云函数适配，避免在小程序端暴露密钥。需要配置云函数环境变量：
+
+```text
+TENCENT_INDOOR_API_URL=腾讯室内定位服务接口地址
+TENCENT_INDOOR_API_KEY=腾讯室内服务密钥或腾讯地图 Key
+TENCENT_INDOOR_CAMPUS_ID=shanghaitech
+```
+
+说明：腾讯地图室内能力通常需要室内图/室内定位服务开通和场地数据接入。未配置时，小程序会自动降级为“GPS + 校内 POI + Wi-Fi/BLE 本地指纹”的定位策略。
 
 ## 相似物品匹配
 
@@ -146,6 +185,7 @@ HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
 - `markReturned`
 - `undoReturned`
 - `reportContent`
+- `resolveTencentIndoor`
 
 ## 开发说明
 
