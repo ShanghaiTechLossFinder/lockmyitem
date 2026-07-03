@@ -1,33 +1,16 @@
 <view class="page">
-  <view class="hero found-hero">
-    <view class="hero-glow"></view>
-    <view class="hero-copy">
-      <text class="hero-eyebrow">校内招领台</text>
-      <text class="hero-title">失物招领</text>
-      <text class="hero-subtitle">把捡到的物品变成清晰线索，按地点、分类和 AI 标签快速确认。</text>
-    </view>
-    <view class="hero-panel">
-      <text class="panel-label">待认领</text>
-      <text class="panel-number">{{stats.total}}</text>
-      <button class="hero-action" bindtap="startPublish">发布招领</button>
+  <view class="board-head">
+    <view>
+      <text class="app-title">校园公告板</text>
+      <text class="app-subtitle">上海科技大学 · 失物招领平台</text>
     </view>
   </view>
 
-  <view class="stats-row">
-    <view class="stat-card">
-      <text class="stat-dot active-dot"></text>
-      <text class="stat-value">{{stats.total}}</text>
-      <text class="stat-label">进行中</text>
-    </view>
-    <view class="stat-card">
-      <text class="stat-dot fresh-dot"></text>
-      <text class="stat-value">{{stats.today}}</text>
-      <text class="stat-label">今日新增</text>
-    </view>
-    <view class="stat-card">
-      <text class="stat-dot done-dot"></text>
-      <text class="stat-value">{{stats.returned}}</text>
-      <text class="stat-label">已归还</text>
+  <view class="notice-banner" bindtap="startPublish">
+    <image class="notice-image" src="/assets/notice/campus-board.jpg" mode="aspectFill" />
+    <view class="notice-copy">
+      <text class="notice-title">拾金不昧，传递温暖</text>
+      <text class="notice-subtitle">如遇失物，请及时发布招领信息</text>
     </view>
   </view>
 
@@ -41,39 +24,39 @@
     >{{item}}</view>
   </scroll-view>
 
+  <view class="section-bar" wx:if="{{items.length > 0}}">
+    <view>
+      <text class="list-title">近期拾到 · {{stats.total}} 条</text>
+      <text class="list-subtitle">按最新发布排序</text>
+    </view>
+    <button class="sort-button" bindtap="startPublish">发布</button>
+  </view>
+
   <view wx:if="{{items.length === 0}}" class="empty">暂时没有招领信息</view>
 
-  <view class="list-head" wx:if="{{items.length > 0}}">
-    <text class="list-title">最新招领线索</text>
-    <text class="list-subtitle">点击卡片查看详情与联系信息</text>
-  </view>
-
-  <view wx:for="{{items}}" wx:key="_id" class="item-card" bindtap="goDetail" data-id="{{item._id}}">
-    <view class="image-box">
-      <image wx:if="{{item.thumbUrl}}" src="{{item.thumbUrl}}" mode="aspectFill" />
-      <text wx:else>{{item.category}}</text>
-    </view>
-    <view class="item-main">
-      <view class="item-head">
-        <view class="title-stack">
-          <text class="item-kicker">招领线索</text>
+  <view class="feed-panel" wx:if="{{items.length > 0}}">
+    <view wx:for="{{items}}" wx:key="_id" class="item-row" bindtap="goDetail" data-id="{{item._id}}">
+      <view class="image-box">
+        <image wx:if="{{item.thumbUrl}}" src="{{item.thumbUrl}}" mode="aspectFill" />
+        <text wx:else>{{item.category}}</text>
+      </view>
+      <view class="item-main">
+        <view class="item-head">
           <text class="item-title">{{item.title}}</text>
+          <text class="type-pill found">招领中</text>
         </view>
-        <text class="type-pill found">招领</text>
-      </view>
-      <text class="item-desc">{{item.description}}</text>
-      <view class="item-meta" wx:if="{{item.locationName || item.locationDetail}}">
-        <text class="meta-mark"></text>
-        <text>发现地点 · {{item.locationName}}</text>
-      </view>
-      <view class="tag-row">
-        <text class="tag">{{item.category}}</text>
-        <text wx:for="{{item.aiTags}}" wx:key="*this" class="tag light">{{item}}</text>
+        <text class="item-desc">{{item.description}}</text>
+        <view class="item-meta" wx:if="{{item.locationName || item.locationDetail}}">
+          <text class="pin-dot"></text>
+          <text>{{item.locationName}}</text>
+          <text class="tag light">{{item.category}}</text>
+        </view>
       </view>
     </view>
   </view>
 
-  <view class="publish-fab" bindtap="startPublish">
-    <text class="plus">+</text>
+  <view class="safety-note">
+    <text class="shield-dot"></text>
+    <text>温馨提示：请勿发布他人隐私信息，招领成功后请及时下架。</text>
   </view>
 </view>

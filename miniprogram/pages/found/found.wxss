@@ -1,5 +1,33 @@
-.found-home {
-  background: #F8FBFC;
+.page {
+  padding: 28rpx 22rpx 88rpx;
+  background: #fbfaf6;
+}
+
+.board-head {
+  margin: 10rpx 12rpx 24rpx;
+}
+
+.app-title,
+.app-subtitle,
+.summary-number,
+.summary-label,
+.title,
+.meta {
+  display: block;
+}
+
+.app-title {
+  color: #1f6b5d;
+  font-size: 48rpx;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.app-subtitle {
+  margin-top: 12rpx;
+  color: #66706f;
+  font-size: 28rpx;
+  line-height: 1.35;
 }
 
 .summary-card {
@@ -7,36 +35,49 @@
   align-items: baseline;
   gap: 14rpx;
   margin-bottom: 20rpx;
-  padding: 22rpx 24rpx;
-  background: #FFFFFF;
-  border: 1rpx solid #D7E4E8;
-  border-radius: 8rpx;
+  padding: 24rpx;
+  background: #ffffff;
+  border: 1rpx solid #e7e4dc;
+  border-radius: 10rpx;
 }
 
 .summary-number {
-  color: #C4862F;
-  font-size: 42rpx;
+  color: #c07312;
+  font-size: 44rpx;
   font-weight: 900;
   line-height: 1;
 }
 
 .summary-label {
-  color: #475467;
+  color: #626b70;
   font-size: 28rpx;
 }
 
-.found-card {
+.feed-panel {
+  overflow: hidden;
+  background: #ffffff;
+  border: 1rpx solid #e7e4dc;
+  border-radius: 10rpx;
+}
+
+.found-row {
   display: flex;
   align-items: center;
   gap: 18rpx;
+  padding: 24rpx;
+  border-bottom: 1rpx solid #ece9e2;
+}
+
+.found-row:last-child {
+  border-bottom: 0;
 }
 
 .badge {
   flex: 0 0 auto;
   padding: 10rpx 16rpx;
-  color: #245B6B;
-  background: #E4F0F2;
-  border-radius: 6rpx;
+  color: #1f6b5d;
+  background: #eef5f2;
+  border-radius: 10rpx;
   font-size: 26rpx;
   font-weight: 800;
 }
@@ -45,15 +86,10 @@
   min-width: 0;
 }
 
-.title,
-.meta {
-  display: block;
-}
-
 .title {
   overflow: hidden;
-  color: #111827;
-  font-size: 34rpx;
+  color: #1f2933;
+  font-size: 32rpx;
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -62,7 +98,7 @@
 .meta {
   margin-top: 8rpx;
   overflow: hidden;
-  color: #667085;
+  color: #727b80;
   font-size: 26rpx;
   text-overflow: ellipsis;
   white-space: nowrap;

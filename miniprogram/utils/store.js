@@ -16,6 +16,16 @@ const LOCATION_ID_ALIASES = {
   gate: 'south-gate'
 };
 
+const DEMO_THUMBS = {
+  item_umbrella_found_1: '/assets/items/umbrella.jpg',
+  item_card_1: '/assets/items/card.jpg',
+  item_earbuds_found_1: '/assets/items/earbuds.jpg',
+  item_keys_found_1: '/assets/items/keys.jpg',
+  item_notebook_found_1: '/assets/items/notebook.jpg',
+  item_umbrella_1: '/assets/items/umbrella.jpg',
+  item_bottle_1: '/assets/items/notebook.jpg'
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -69,6 +79,60 @@ function createSeedState() {
       ownerName: '热心同学',
       createdAt: '2026-06-28T11:20:00.000Z',
       updatedAt: '2026-06-28T11:20:00.000Z'
+    },
+    {
+      _id: 'item_earbuds_found_1',
+      type: 'found',
+      title: '白色无线耳机（右耳缺失）',
+      description: '在学生服务中心门口座椅上捡到，充电盒完好，右耳缺失。',
+      category: '电子产品',
+      aiTags: ['耳机', '白色', '充电盒'],
+      imageUrls: [],
+      thumbUrl: '/assets/items/earbuds.jpg',
+      locationId: 'campus-service',
+      locationName: '校园服务中心',
+      locationDetail: '',
+      status: 'active',
+      ownerOpenid: 'demo_owner_earbuds',
+      ownerName: '服务中心同学',
+      createdAt: '2026-06-28T09:10:00.000Z',
+      updatedAt: '2026-06-28T09:10:00.000Z'
+    },
+    {
+      _id: 'item_keys_found_1',
+      type: 'found',
+      title: '钥匙串（蓝色圆形挂饰）',
+      description: '在物质学院楼下自行车停放处捡到。',
+      category: '钥匙',
+      aiTags: ['钥匙', '蓝色挂饰'],
+      imageUrls: [],
+      thumbUrl: '/assets/items/keys.jpg',
+      locationId: 'spst',
+      locationName: '物质科学与技术学院',
+      locationDetail: '',
+      status: 'active',
+      ownerOpenid: 'demo_owner_keys',
+      ownerName: '物质学院同学',
+      createdAt: '2026-06-27T20:15:00.000Z',
+      updatedAt: '2026-06-27T20:15:00.000Z'
+    },
+    {
+      _id: 'item_notebook_found_1',
+      type: 'found',
+      title: '黑色笔记本',
+      description: '封面无字，内有手写笔记。',
+      category: '书本资料',
+      aiTags: ['笔记本', '黑色'],
+      imageUrls: [],
+      thumbUrl: '/assets/items/notebook.jpg',
+      locationId: 'ihuman',
+      locationName: 'iHuman研究所',
+      locationDetail: '',
+      status: 'active',
+      ownerOpenid: 'demo_owner_notebook',
+      ownerName: '研究所同学',
+      createdAt: '2026-06-27T18:42:00.000Z',
+      updatedAt: '2026-06-27T18:42:00.000Z'
     },
     {
       _id: 'item_umbrella_1',
@@ -158,10 +222,25 @@ function createSeedState() {
 function getState() {
   const state = loadState();
   let changed = false;
+  const seed = createSeedState();
+  const existingIds = new Set((state.items || []).map((item) => item._id));
+  seed.items.forEach((item) => {
+    if (!existingIds.has(item._id)) {
+      state.items.push(item);
+      changed = true;
+    }
+  });
   state.items = (state.items || []).map((item) => {
       const location = findLocation(item.locationId);
     const matchFeatures = item.matchFeatures || extractItemFeatures(item);
-    if (!location) return item;
+    const defaultThumb = DEMO_THUMBS[item._id] || '';
+    if (!location) {
+      if (!item.thumbUrl && defaultThumb) {
+        changed = true;
+        return { ...item, thumbUrl: defaultThumb, imageUrls: item.imageUrls && item.imageUrls.length ? item.imageUrls : [defaultThumb] };
+      }
+      return item;
+    }
     if (
       item.latitude
       && item.longitude
@@ -170,6 +249,7 @@ function getState() {
       && item.locationGuide
       && item.locationNearby
       && item.matchFeatures
+      && (item.thumbUrl || !defaultThumb)
       && Math.abs(item.latitude - location.latitude) < 0.00001
       && Math.abs(item.longitude - location.longitude) < 0.00001
     ) return item;
@@ -182,6 +262,8 @@ function getState() {
       locationNearby: item.locationNearby || location.nearby || [],
       locationGuide: item.locationGuide || location.detail || '',
       matchFeatures,
+      thumbUrl: item.thumbUrl || defaultThumb,
+      imageUrls: item.imageUrls && item.imageUrls.length ? item.imageUrls : (defaultThumb ? [defaultThumb] : []),
       latitude: location.latitude,
       longitude: location.longitude,
       mapX: item.mapX || location.mapX,

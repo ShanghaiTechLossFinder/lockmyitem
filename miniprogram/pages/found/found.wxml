@@ -1,8 +1,7 @@
 <view class="page">
-  <view class="surface-hero found-home">
-    <text class="surface-eyebrow">归还记录</text>
-    <text class="surface-title">已找到</text>
-    <text class="surface-subtitle">这里保留已经找回或归还的记录，方便同学确认线索状态。</text>
+  <view class="board-head">
+    <text class="app-title">已找到</text>
+    <text class="app-subtitle">归还成功的物品会留在这里，避免重复认领。</text>
   </view>
 
   <view class="summary-card">
@@ -12,11 +11,13 @@
 
   <view wx:if="{{items.length === 0}}" class="empty">还没有已找到记录</view>
 
-  <view wx:for="{{items}}" wx:key="_id" class="card found-card" bindtap="goDetail" data-id="{{item._id}}">
-    <view class="badge">已回家</view>
-    <view class="item-copy">
-      <text class="title">{{item.title}}</text>
-      <text class="meta">{{item.category}}{{item.locationName ? ' · ' + item.locationName : ''}}</text>
+  <view class="feed-panel" wx:if="{{items.length > 0}}">
+    <view wx:for="{{items}}" wx:key="_id" class="found-row" bindtap="goDetail" data-id="{{item._id}}">
+      <view class="badge">已回家</view>
+      <view class="item-copy">
+        <text class="title">{{item.title}}</text>
+        <text class="meta">{{item.category}}{{item.locationName ? ' · ' + item.locationName : ''}}</text>
+      </view>
     </view>
   </view>
 </view>
