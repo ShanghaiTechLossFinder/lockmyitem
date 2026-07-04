@@ -80,6 +80,7 @@ wx.getLocation({
 - `miniprogram/utils/indoor-fingerprints.js`
 
 隐私边界：室内增强默认关闭。关闭时不会采集或上传 Wi-Fi/BLE 信号；只有用户打开发布页里的“室内增强定位”开关并重新定位后，才会进行采集。
+当前仓库默认仅在本地使用 Wi-Fi/BLE 信号做指纹匹配，不把 BSSID 或 BLE deviceId 上传到云函数。若后续为腾讯室内定位开启云端信号解析，必须先完成微信开发者工具和微信公众平台后台的隐私接口声明。
 
 `indoor-fingerprints.js` 默认不写入真实 AP/BLE 数据。比赛现场或校内测试时，可以按地点采集真实信号后填入：
 
@@ -198,9 +199,18 @@ HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
 - 相似匹配：`miniprogram/utils/matcher.js`
 - 云函数：`cloudfunctions/lostfound/index.js`
 
+## 发布隐私检查
+
+正式提交审核前，需要在微信开发者工具和微信公众平台后台确认隐私声明与实际调用一致：
+
+- `wx.getLocation`：用于匹配上科大校内地点，仓库已在 `requiredPrivateInfos` 中声明 `getLocation`。
+- `wx.startWifi` / `wx.getConnectedWifi` / `wx.getWifiList`：仅在用户开启“室内增强定位”后采集，用于本地室内指纹匹配。
+- `wx.openBluetoothAdapter` / `wx.startBluetoothDevicesDiscovery`：仅在用户开启“室内增强定位”后采集，用于本地 BLE 指纹匹配。
+- 如果未来开启云端腾讯室内信号解析，需要在隐私声明中说明会上传 Wi-Fi/BLE 信号摘要，并完成对应后台审核。
+
 ## 已知限制
 
 - 图像识别依赖腾讯云混元 API，未配置 `HUNYUAN_API_KEY` 时会返回 `MODEL_NOT_CONFIGURED`。
 - 本地 mock 数据只存在于微信开发者工具本地缓存中。
 - 邮箱字段已保存，但邮件通知尚未接入实际发送服务。
-- 正式上线前需要配置真实 AppID、云开发环境和隐私接口声明。
+- 正式上线前需要配置真实 AppID、云开发环境，并在微信后台完成 Wi-Fi/BLE/设备信息相关隐私声明。

@@ -22,9 +22,13 @@ function collectWifiSignals() {
     let settled = false;
     let connected = null;
     let list = [];
+    let wifiListHandler = null;
     const finish = (result = {}) => {
       if (settled) return;
       settled = true;
+      if (wifiListHandler && safeCall(wx.offGetWifiList)) {
+        wx.offGetWifiList(wifiListHandler);
+      }
       resolve({
         ok: Boolean(connected || list.length),
         reason: result.reason || '',
@@ -46,11 +50,12 @@ function collectWifiSignals() {
         }
 
         if (safeCall(wx.onGetWifiList) && safeCall(wx.getWifiList)) {
-          wx.onGetWifiList((res) => {
+          wifiListHandler = (res) => {
             list = (res.wifiList || []).slice(0, 20);
             clearTimeout(timer);
             finish();
-          });
+          };
+          wx.onGetWifiList(wifiListHandler);
           wx.getWifiList({
             fail: () => {
               clearTimeout(timer);
@@ -82,9 +87,13 @@ function collectBleSignals() {
 
     let devices = [];
     let settled = false;
+    let deviceFoundHandler = null;
     const finish = (result = {}) => {
       if (settled) return;
       settled = true;
+      if (deviceFoundHandler && safeCall(wx.offBluetoothDeviceFound)) {
+        wx.offBluetoothDeviceFound(deviceFoundHandler);
+      }
       if (safeCall(wx.stopBluetoothDevicesDiscovery)) {
         wx.stopBluetoothDevicesDiscovery({ complete: () => {} });
       }
@@ -105,7 +114,7 @@ function collectBleSignals() {
     wx.openBluetoothAdapter({
       success: () => {
         if (safeCall(wx.onBluetoothDeviceFound)) {
-          wx.onBluetoothDeviceFound((res) => {
+          deviceFoundHandler = (res) => {
             const nextDevices = res.devices || [];
             nextDevices.forEach((device) => {
               const key = device.deviceId || device.name || device.localName;
@@ -120,7 +129,8 @@ function collectBleSignals() {
                 devices.push(device);
               }
             });
-          });
+          };
+          wx.onBluetoothDeviceFound(deviceFoundHandler);
         }
         wx.startBluetoothDevicesDiscovery({
           allowDuplicatesKey: false,
@@ -226,30 +236,7 @@ function indoorSignalSummary(signals = {}) {
   return `已采集 Wi-Fi ${wifiCount} 个、BLE ${bleCount} 个室内信号${tencentText}`;
 }
 
-function compactWifi(wifi = {}) {
-  const normalizeWifi = (entry = {}) => ({
-    SSID: entry.SSID || '',
-    BSSID: entry.BSSID || '',
-    signalStrength: entry.signalStrength || 0,
-    frequency: entry.frequency || 0
-  });
-  return {
-    connected: wifi.connected ? normalizeWifi(wifi.connected) : null,
-    list: (wifi.list || []).slice(0, 20).map(normalizeWifi)
-  };
-}
-
-function compactBle(ble = {}) {
-  return {
-    devices: (ble.devices || []).slice(0, 20).map((device) => ({
-      deviceId: device.deviceId || '',
-      name: device.name || device.localName || '',
-      RSSI: device.RSSI || 0
-    }))
-  };
-}
-
-function resolveTencentIndoor(gps, wifi, ble) {
+function resolveTencentIndoor(gps) {
   const app = typeof getApp === 'function' ? getApp() : null;
   if (!app || !app.globalData || !app.globalData.cloudReady || !wx.cloud) {
     return Promise.resolve({ ok: false, reason: '云开发未启用，跳过腾讯室内定位' });
@@ -259,9 +246,7 @@ function resolveTencentIndoor(gps, wifi, ble) {
       name: 'lostfound',
       data: {
         action: 'resolveTencentIndoor',
-        gps: gps || null,
-        wifi: compactWifi(wifi),
-        ble: compactBle(ble)
+        gps: gps || null
       },
       success: (res) => {
         const result = res.result || {};
@@ -278,7 +263,7 @@ function resolveTencentIndoor(gps, wifi, ble) {
 
 function collectIndoorSignals(gps) {
   return Promise.all([collectWifiSignals(), collectBleSignals()])
-    .then(([wifi, ble]) => resolveTencentIndoor(gps, wifi, ble)
+    .then(([wifi, ble]) => resolveTencentIndoor(gps)
       .then((tencentIndoor) => ({
         wifi,
         ble,

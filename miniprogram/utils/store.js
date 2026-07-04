@@ -291,9 +291,9 @@ function loadState() {
 function migrateState(previous) {
   const seed = createSeedState();
   const previousUser = previous.currentUser || {};
-  const emailPrefix = previousUser.emailPrefix || extractEmailPrefix(previousUser.email || '');
-  const email = previousUser.email || (emailPrefix ? `${emailPrefix}@shanghaitech.edu.cn` : '');
-  const registered = Boolean(previousUser.registered || email || emailPrefix);
+  const emailPrefix = normalizeSchoolEmailPrefix(previousUser.emailPrefix || extractEmailPrefix(previousUser.email || ''));
+  const email = emailPrefix ? `${emailPrefix}@shanghaitech.edu.cn` : '';
+  const registered = Boolean((previousUser.registered && emailPrefix) || emailPrefix);
   return {
     ...seed,
     ...previous,
@@ -327,7 +327,11 @@ function setState(nextState) {
 }
 
 function extractEmailPrefix(email = '') {
-  return String(email).replace(/@shanghaitech\.edu\.cn$/i, '').trim();
+  const source = String(email).trim();
+  if (!source) return '';
+  if (!/@/.test(source)) return source;
+  const match = source.match(/^([^@]+)@shanghaitech\.edu\.cn$/i);
+  return match ? match[1] : '';
 }
 
 function ensureSeedData() {
@@ -359,7 +363,7 @@ function registerUser(profile = {}) {
   const state = getState();
   const user = login();
   const emailPrefix = normalizeSchoolEmailPrefix(profile.emailPrefix || profile.email || '');
-  if (!emailPrefix && profile.loginMethod !== 'wechat') {
+  if (!emailPrefix) {
     throw new Error('请输入上科大邮箱前缀');
   }
   const nickName = (profile.nickName || user.nickName || '微信用户').trim();

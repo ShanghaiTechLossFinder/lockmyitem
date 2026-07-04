@@ -250,9 +250,7 @@ async function resolveTencentIndoor(event) {
     },
     body: JSON.stringify({
       campusId: TENCENT_INDOOR_CONFIG.campusId,
-      gps: event.gps || null,
-      wifi: event.wifi || {},
-      ble: event.ble || {}
+      gps: event.gps || null
     }),
     timeout: 8000
   });

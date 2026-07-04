@@ -27,6 +27,10 @@ Page({
           usingWechat: true,
           nickName: userInfo.nickName || this.data.nickName
         });
+        if (!this.data.emailPrefix) {
+          wx.showToast({ title: '请先填写学校邮箱前缀', icon: 'none' });
+          return;
+        }
         this.finishRegistration({
           nickName: userInfo.nickName || this.data.nickName || '微信用户',
           avatarUrl: userInfo.avatarUrl || '',
