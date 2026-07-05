@@ -30,7 +30,7 @@ TENCENT_MAP_KEY=your-tencent-location-service-key
 TENCENT_MAP_NETWORK_URL=https://apis.map.qq.com/ws/location/v1/network
 ```
 
-`TENCENT_MAP_SK` is optional. Configure it only when your Tencent Location Service key requires request signing.
+`TENCENT_MAP_SK` is optional. Configure it only when your Tencent Location Service key requires request signing. Use the raw SK value only; do not include the `sk:` prefix.
 
 Optional OpenAI-compatible Hunyuan mode:
 

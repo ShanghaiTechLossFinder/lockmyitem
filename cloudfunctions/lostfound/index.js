@@ -47,10 +47,18 @@ const HUNYUAN_CONFIG = {
   tencentRegion: process.env.TENCENTCLOUD_REGION || process.env.TENCENT_REGION || ''
 };
 
+function envValue(value = '') {
+  return String(value || '').trim();
+}
+
+function normalizeTencentMapSk(value = '') {
+  return envValue(value).replace(/^sk\s*[:：]\s*/i, '');
+}
+
 const TENCENT_MAP_CONFIG = {
-  key: process.env.TENCENT_MAP_KEY || '',
-  sk: process.env.TENCENT_MAP_SK || process.env.TENCENT_MAP_SECRET_KEY || '',
-  networkUrl: process.env.TENCENT_MAP_NETWORK_URL || 'https://apis.map.qq.com/ws/location/v1/network'
+  key: envValue(process.env.TENCENT_MAP_KEY),
+  sk: normalizeTencentMapSk(process.env.TENCENT_MAP_SK || process.env.TENCENT_MAP_SECRET_KEY),
+  networkUrl: envValue(process.env.TENCENT_MAP_NETWORK_URL) || 'https://apis.map.qq.com/ws/location/v1/network'
 };
 
 function ok(data = {}) {
@@ -288,10 +296,12 @@ function tencentMapSignatureValue(value) {
   return String(value);
 }
 
-function buildTencentMapSig(pathname, payload) {
-  const query = Object.keys(payload)
+function buildTencentMapSig(pathname, payload, queryParams = {}) {
+  const params = { ...queryParams, ...payload };
+  delete params.sig;
+  const query = Object.keys(params)
     .sort()
-    .map((key) => `${key}=${tencentMapSignatureValue(payload[key])}`)
+    .map((key) => `${key}=${tencentMapSignatureValue(params[key])}`)
     .join('&');
   return crypto.createHash('md5').update(`${pathname}?${query}${TENCENT_MAP_CONFIG.sk}`, 'utf8').digest('hex').toLowerCase();
 }
@@ -336,7 +346,11 @@ async function resolveIndoorSignals(event = {}) {
   }
   const endpoint = new URL(TENCENT_MAP_CONFIG.networkUrl);
   if (TENCENT_MAP_CONFIG.sk) {
-    endpoint.searchParams.set('sig', buildTencentMapSig(endpoint.pathname, payload));
+    const queryParams = {};
+    endpoint.searchParams.forEach((value, key) => {
+      queryParams[key] = value;
+    });
+    endpoint.searchParams.set('sig', buildTencentMapSig(endpoint.pathname, payload, queryParams));
   }
   const response = await fetch(endpoint.toString(), {
     method: 'POST',
@@ -346,7 +360,11 @@ async function resolveIndoorSignals(event = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.status !== 0) {
-    return fail(data.message || `室内增强定位失败 HTTP ${response.status}`, 'INDOOR_NETWORK_FAILED');
+    const message = data.message || `室内增强定位失败 HTTP ${response.status}`;
+    const hint = /签名|sig|sn/i.test(message)
+      ? '。请确认 TENCENT_MAP_SK 填的是纯 SK 值，不要带 sk: 前缀，并确认它属于当前 TENCENT_MAP_KEY'
+      : '';
+    return fail(`${message}${hint}`, 'INDOOR_NETWORK_FAILED');
   }
   const result = data.result || {};
   const location = result.location || {};
