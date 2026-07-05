@@ -203,65 +203,48 @@
 
 .location-head {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 18rpx;
+  gap: 14rpx;
 }
 
 .location-head .row-label {
   margin-top: 0;
-  margin-bottom: 8rpx;
-}
-
-.location-tip {
-  display: block;
-  color: #667085;
-  font-size: 26rpx;
-  line-height: 1.45;
-}
-
-.location-meta {
-  display: block;
-  margin-top: 8rpx;
-  color: #344054;
-  font-size: 24rpx;
-  line-height: 1.4;
+  margin-bottom: 0;
 }
 
 .location-actions {
-  flex: 0 0 auto;
-  display: grid;
-  gap: 10rpx;
-  width: 168rpx;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14rpx;
+  width: 100%;
 }
 
-.locate-button,
 .indoor-button {
-  width: 100%;
+  flex: 0 0 176rpx;
   height: 62rpx;
   margin: 0;
-  padding: 0 18rpx;
+  padding: 0;
   color: #ffffff;
-  background: #245B6B;
+  background: #1f9d6a;
   border-radius: 8rpx;
   font-size: 26rpx;
+  font-weight: 800;
   line-height: 62rpx;
 }
 
-.indoor-button {
-  background: #1f9d6a;
-}
-
 .map-picker-button {
-  width: 100%;
+  flex: 0 0 176rpx;
   height: 62rpx;
   margin: 0;
-  padding: 0 18rpx;
+  padding: 0;
   color: #245B6B;
   background: #ffffff;
   border: 1rpx solid #A8CAD0;
   border-radius: 8rpx;
   font-size: 26rpx;
+  font-weight: 800;
   line-height: 62rpx;
 }
 
@@ -338,7 +321,6 @@
   line-height: 1.4;
 }
 
-.locate-button::after,
 .indoor-button::after,
 .map-picker-button::after,
 .candidate::after,

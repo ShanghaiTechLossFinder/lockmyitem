@@ -241,14 +241,14 @@ Page({
     categories: CATEGORIES,
     locationKeyword: '',
     locations: searchLocations(),
-    locationCandidates: commonLocations(),
+    locationCandidates: [],
     locating: false,
     classifying: false,
     indoorLocating: false,
     indoorMeta: '',
-    locationTip: '请选择发现或丢失的大致校内地点',
+    locationTip: '',
     locationState: 'idle',
-    locationMeta: '不调用位置接口，可搜索地点或从常用地点中选择',
+    locationMeta: '',
     locationConfirm: null,
     showCampusMap: false,
     campusMapMarkers: campusMapMarkers(),
@@ -273,7 +273,7 @@ Page({
     }
     this.setData({
       form: nextForm,
-      locationCandidates: commonLocations(),
+      locationCandidates: [],
       locations: searchLocations()
     });
   },
@@ -320,20 +320,6 @@ Page({
     }
   },
 
-  showCommonLocations() {
-    this.setData({
-      locating: false,
-      showCampusMap: false,
-      locationState: 'idle',
-      locationMeta: '已显示常用校内地点，也可以继续搜索',
-      locationConfirm: null,
-      locationTip: '请选择发现或丢失的大致校内地点',
-      locationCandidates: commonLocations(),
-      locationKeyword: '',
-      locations: searchLocations()
-    });
-  },
-
   openCampusMap() {
     this.setData({
       showCampusMap: true,
@@ -349,9 +335,9 @@ Page({
     this.setData({
       indoorLocating: true,
       locationState: 'idle',
-      locationTip: '正在进行室内增强调用...',
+      locationTip: '正在获取位置...',
       locationMeta: '仅采集 Wi-Fi/BLE 信号，不调用普通定位',
-      indoorMeta: '正在采集室内信号...',
+      indoorMeta: '正在获取位置...',
       showCampusMap: false,
       locationCandidates: []
     });
@@ -360,20 +346,20 @@ Page({
 
   applyIndoorSignals(signals = {}) {
     const network = signals.network || {};
-    const summary = signals.summary || '室内增强调用完成';
+    const summary = signals.summary || '获取位置完成';
     if (network.ok && network.data && network.data.latitude && network.data.longitude) {
       const candidates = nearestCampusLocations(network.data, 6);
       const nearest = candidates[0];
       const accuracy = Math.round(Number(network.data.accuracy) || 0);
       const meta = `${summary} · 云端返回精度 ${accuracy || '未知'}m`;
       if (nearest && nearest.distance <= INDOOR_MATCH_DISTANCE) {
-        this.setLocation(nearest, `室内增强匹配到 ${nearest.name}`, {
+        this.setLocation(nearest, `已获取到 ${nearest.name}`, {
           meta: `${meta} · 距校内地点 ${nearest.distance}m`,
-          detail: '室内增强定位',
+          detail: '获取位置',
           confirm: {
             ...buildManualLocationConfirm(nearest),
-            label: '室内增强：',
-            confirmText: '已根据室内增强结果匹配校内地点，请确认后发布'
+            label: '获取位置：',
+            confirmText: '已根据获取位置结果匹配校内地点，请确认后发布'
           }
         });
         this.setData({
@@ -387,7 +373,7 @@ Page({
         indoorLocating: false,
         indoorMeta: `${meta} · 距校内地点较远，请手动确认`,
         locationState: 'warn',
-        locationTip: '室内增强返回位置偏离校内地点，请从候选地点中选择',
+        locationTip: '获取位置结果偏离校内地点，请从候选地点中选择',
         locationMeta: meta,
         locationCandidates: candidates.length ? candidates : commonLocations()
       });
@@ -397,7 +383,7 @@ Page({
       indoorLocating: false,
       indoorMeta: `${summary} · ${network.reason || '云端未返回坐标'}`,
       locationState: 'warn',
-      locationTip: '室内增强调用完成，请从候选地点中确认',
+      locationTip: '获取位置完成，请从候选地点中确认',
       locationMeta: summary,
       locationCandidates: commonLocations()
     });
@@ -461,13 +447,13 @@ Page({
       'form.locationId': '',
       'form.locationDetail': '',
       locationKeyword: '',
-      locationTip: '请选择发现或丢失的大致校内地点',
+      locationTip: '',
       locationState: 'idle',
-      locationMeta: '不调用位置接口，可搜索地点或从常用地点中选择',
+      locationMeta: '',
       locationConfirm: null,
       indoorMeta: '',
       showCampusMap: false,
-      locationCandidates: commonLocations(),
+      locationCandidates: [],
       locations: searchLocations()
     });
   },
@@ -708,12 +694,12 @@ Page({
       aiProcessStage: 'idle',
       aiExtractedText: '',
       aiProcessSteps: [],
-      locationCandidates: commonLocations(),
+      locationCandidates: [],
       showCampusMap: false,
       indoorMeta: '',
-      locationTip: '请选择发现或丢失的大致校内地点',
+      locationTip: '',
       locationState: 'idle',
-      locationMeta: '不调用位置接口，可搜索地点或从常用地点中选择',
+      locationMeta: '',
       locationConfirm: null
     });
     wx.navigateTo({ url: `/pages/detail/detail?id=${item._id}` });
