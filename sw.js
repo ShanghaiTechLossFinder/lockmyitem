@@ -1,5 +1,5 @@
 const CACHE_NAME = 'shanghaitech-lostfound-v2';
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
+const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -22,7 +22,7 @@ self.addEventListener('fetch', (event) => {
 
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match('/'))
+      fetch(event.request).catch(() => caches.match('./'))
     );
     return;
   }
@@ -33,7 +33,7 @@ self.addEventListener('fetch', (event) => {
         const clone = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         return response;
-      }).catch(() => caches.match('/'))
+      }).catch(() => caches.match('./'))
     ))
   );
 });
