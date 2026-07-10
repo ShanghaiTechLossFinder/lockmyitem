@@ -36,6 +36,8 @@ VITE_TCB_REGION=ap-shanghai
 VITE_TCB_ACCESS_KEY=CloudBase Web Publishable Key
 ```
 
+可以复制 `web/.env.production.example` 为 `web/.env.production`，只在本地或部署平台配置真实 `VITE_TCB_ACCESS_KEY`，不要把真实 key 提交到 GitHub。
+
 调用数据与小程序一致：
 
 ```js
@@ -65,6 +67,33 @@ ALLOWED_ORIGIN=https://lockmyitem.asia
 ```
 
 部署后，图片上传会调用该接口，再由服务端调用腾讯混元视觉模型返回分类、标签和物品描述。网页不会再使用浏览器本地模型伪装成自动识别。
+
+### lockmyitem.asia 上线检查
+
+1. CloudBase 环境使用 `cloud1-d9gnyuxf5b44b6b92`。
+2. `lostfound` 云函数部署最新代码，且 `classifyImage` action 可用。
+3. 云函数环境变量至少配置一组：
+   - `HUNYUAN_API_KEY`
+   - `HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1`
+   - `HUNYUAN_MODEL=hunyuan-vision`
+4. 或者配置腾讯云签名调用：
+   - `TENCENT_SECRET_ID`
+   - `TENCENT_SECRET_KEY`
+   - `TENCENT_HUNYUAN_ENDPOINT=https://hunyuan.tencentcloudapi.com`
+   - `HUNYUAN_MODEL=hunyuan-vision`
+5. CloudBase Web 端权限二选一：
+   - 开启匿名登录，让前端用匿名身份调用云函数。
+   - 配置 Web Publishable Key，并在构建时设置 `VITE_TCB_ACCESS_KEY`。
+6. 将 `https://lockmyitem.asia` 加入 CloudBase Web 安全来源或允许来源。
+7. 构建并部署网页端：
+
+```bash
+cd web
+npm install
+npm run build
+```
+
+目标返回字段包括：`category`、`aiTags`、`visualDescription`、`yoloObjects`、`semanticTags`、`modelSources`。
 
 ## 手机浏览器安装
 

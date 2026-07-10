@@ -112,6 +112,23 @@ function normalizeImageBase64(imageBase64 = '', mimeType = 'image/jpeg') {
   return `data:${mimeType || 'image/jpeg'};base64,${value.replace(/^data:[^,]+,/, '')}`;
 }
 
+function normalizeImageUrl(imageUrl = '') {
+  const value = String(imageUrl || '').trim();
+  if (!value) return '';
+  try {
+    const parsed = new URL(value);
+    const embeddedUrl = parsed.searchParams.get('mediaurl')
+      || parsed.searchParams.get('imgurl')
+      || parsed.searchParams.get('url');
+    if (embeddedUrl && /^https?:\/\//i.test(embeddedUrl)) {
+      return embeddedUrl;
+    }
+  } catch {
+    // Keep the original value so callers still get a helpful model/provider error.
+  }
+  return value;
+}
+
 function sha256(value, encoding = 'hex') {
   return crypto.createHash('sha256').update(value, 'utf8').digest(encoding);
 }
@@ -323,7 +340,7 @@ async function classifyImage(event) {
     return fail('缺少图片 fileId、imageUrl 或 imageBase64');
   }
 
-  let imageUrl = event.imageUrl || '';
+  let imageUrl = normalizeImageUrl(event.imageUrl || '');
   if (!imageUrl && event.imageBase64) {
     imageUrl = normalizeImageBase64(event.imageBase64, event.mimeType || event.contentType || 'image/jpeg');
   }
@@ -339,7 +356,12 @@ async function classifyImage(event) {
     fileId: event.fileId || '',
     hint: event.hint || ''
   };
-  const semantic = await callHunyuanVision(payload);
+  let semantic;
+  try {
+    semantic = await callHunyuanVision(payload);
+  } catch (error) {
+    return fail(error.message || '混元识别失败，请检查图片链接或模型权限', 'HUNYUAN_FAILED');
+  }
   const aiTags = unique([
     ...semantic.tags,
     ...semantic.colors,

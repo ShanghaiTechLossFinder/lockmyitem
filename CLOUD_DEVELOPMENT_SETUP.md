@@ -60,4 +60,34 @@ with:
 
 If the CloudBase console still reports `FUNCTIONS_TIME_LIMIT_EXCEEDED`, open `lostfound` in the CloudBase console and set the function timeout to 30 seconds manually, then deploy again.
 
+## Test classifyImage
+
+Use a direct image URL that can be downloaded by Tencent Cloud. Do not use search result pages such as Bing Image detail URLs. Some school website assets may return `403 Forbidden` to cloud-side requests and will be rejected by Hunyuan as invalid images.
+
+Cloud function test event:
+
+```json
+{
+  "action": "classifyImage",
+  "imageUrl": "https://raw.githubusercontent.com/shaolq07/shanghaitech_findloss/main/web/src/assets/items/umbrella.jpg",
+  "hint": "雨伞，校园失物招领图片识别测试"
+}
+```
+
+Expected result:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "category": "雨伞",
+    "aiTags": [],
+    "visualDescription": "",
+    "yoloObjects": [],
+    "semanticTags": [],
+    "modelSources": {}
+  }
+}
+```
+
 Do not commit real API keys. Keep them only in CloudBase environment variables.

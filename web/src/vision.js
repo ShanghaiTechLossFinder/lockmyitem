@@ -1,7 +1,7 @@
-const TCB_ENV_ID = import.meta.env.VITE_TCB_ENV_ID || 'cloud1-d9gnyuxf5b44b6b92';
-const TCB_ACCESS_KEY = import.meta.env.VITE_TCB_ACCESS_KEY || '';
-const TCB_REGION = import.meta.env.VITE_TCB_REGION || 'ap-shanghai';
-const TCB_FUNCTION_NAME = import.meta.env.VITE_TCB_FUNCTION_NAME || 'lostfound';
+const TCB_ENV_ID = import.meta.env.VITE_CLOUDBASE_ENV_ID || import.meta.env.VITE_TCB_ENV_ID || 'cloud1-d9gnyuxf5b44b6b92';
+const TCB_ACCESS_KEY = import.meta.env.VITE_CLOUDBASE_ACCESS_KEY || import.meta.env.VITE_TCB_ACCESS_KEY || '';
+const TCB_REGION = import.meta.env.VITE_CLOUDBASE_REGION || import.meta.env.VITE_TCB_REGION || 'ap-shanghai';
+const TCB_FUNCTION_NAME = import.meta.env.VITE_CLOUDBASE_FUNCTION_NAME || import.meta.env.VITE_TCB_FUNCTION_NAME || 'lostfound';
 const TCB_ENABLED = import.meta.env.VITE_DISABLE_TCB_HUNYUAN !== 'true' && Boolean(TCB_ENV_ID);
 const REMOTE_MODEL_ENDPOINT = import.meta.env.VITE_MODEL_API_URL || import.meta.env.VITE_HUNYUAN_API_URL || '';
 
@@ -130,10 +130,15 @@ async function getCloudbaseApp() {
 
 async function ensureCloudbaseAuth(app) {
   const auth = typeof app.auth === 'function' ? app.auth({ persistence: 'local' }) : app.auth;
-  if (!auth || TCB_ACCESS_KEY) return;
+  if (!auth) return;
 
   const state = await (auth.hasLoginState?.() || auth.getLoginState?.()).catch(() => null);
   if (state) return;
+
+  if (typeof auth.signInAnonymously === 'function') {
+    await auth.signInAnonymously();
+    return;
+  }
 
   const provider = typeof auth.anonymousAuthProvider === 'function'
     ? auth.anonymousAuthProvider()
