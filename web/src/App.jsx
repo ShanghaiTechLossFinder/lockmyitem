@@ -500,6 +500,24 @@ function PublishPage({ initialType, items, currentUser, onCancel, onSubmit }) {
       .join('、') || '物品特征待确认';
   }
 
+  function suggestedTitle(data = {}) {
+    if (data.title || data.name) return data.title || data.name;
+
+    const tags = [
+      ...(data.colors || []),
+      ...(data.tags || []),
+      ...(data.semanticTags || []),
+      ...(data.yoloObjects || []),
+      data.category
+    ].filter(Boolean);
+    const uniqueTags = Array.from(new Set(tags.map((entry) => String(entry).trim()).filter(Boolean)));
+    const title = uniqueTags
+      .filter((entry) => !['其他', '待确认'].includes(entry))
+      .slice(0, 3)
+      .join('');
+    return title || data.category || '';
+  }
+
   async function chooseImage(file) {
     if (!file) return;
     setClassifying(true);
@@ -510,10 +528,11 @@ function PublishPage({ initialType, items, currentUser, onCancel, onSubmit }) {
       const result = await recognizeImageFile(file, recognitionHint());
       const data = result.data || {};
       const nextExtractedText = extractedText(data);
+      const nextTitle = suggestedTitle(data);
       setForm((current) => ({
         ...current,
         image: result.image,
-        title: current.title || data.title || data.category || '',
+        title: current.title || nextTitle,
         description: current.description || data.description || data.visualDescription || '',
         category: data.category || current.category || '其他',
         tags: data.tags || [],
