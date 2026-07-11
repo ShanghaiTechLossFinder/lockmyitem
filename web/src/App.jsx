@@ -483,6 +483,13 @@ function PublishPage({ initialType, items, currentUser, onCancel, onSubmit }) {
     }
   }, [form.title, form.description]);
 
+  useEffect(() => {
+    if (!form.image || form.title) return;
+    const nextTitle = suggestedTitle(form);
+    if (!nextTitle) return;
+    setForm((current) => (current.title ? current : { ...current, title: nextTitle }));
+  }, [form.image, form.title, form.category, form.visualDescription, form.tags]);
+
   const matches = useMemo(() => findPotentialMatches(form, items), [form, items]);
 
   function update(field, value) {
