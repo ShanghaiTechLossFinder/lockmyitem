@@ -1,5 +1,24 @@
+import crypto from 'node:crypto';
+
 const HUNYUAN_BASE_URL = (process.env.HUNYUAN_BASE_URL || 'https://api.hunyuan.cloud.tencent.com/v1').replace(/\/$/, '');
 const HUNYUAN_MODEL = process.env.HUNYUAN_MODEL || 'hunyuan-vision';
+const DEFAULT_ALLOWED_ORIGINS = 'https://lockmyitem.asia,https://www.lockmyitem.asia';
+const MODEL_PROXY_TOKEN = process.env.MODEL_PROXY_TOKEN || process.env.CLASSIFY_PROXY_TOKEN || '';
+const REQUIRE_MODEL_PROXY_TOKEN = process.env.REQUIRE_MODEL_PROXY_TOKEN !== 'false';
+const proxyRateBuckets = new Map();
+
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+const PROXY_LIMITS = {
+  maxBodyBytes: positiveNumber(process.env.CLASSIFY_MAX_BODY_BYTES, 6 * 1024 * 1024),
+  maxImageBytes: positiveNumber(process.env.CLASSIFY_MAX_IMAGE_BYTES, 4 * 1024 * 1024),
+  maxImageUrlLength: positiveNumber(process.env.CLASSIFY_MAX_IMAGE_URL_LENGTH, 2048),
+  maxRequests: positiveNumber(process.env.CLASSIFY_RATE_LIMIT_MAX, 20),
+  windowMs: positiveNumber(process.env.CLASSIFY_RATE_LIMIT_WINDOW_MS, 10 * 60 * 1000)
+};
 
 function ok(res, data) {
   return res.status(200).json({ ok: true, data });
@@ -7,6 +26,143 @@ function ok(res, data) {
 
 function fail(res, status, message, code = 'ERROR') {
   return res.status(status).json({ ok: false, code, message });
+}
+
+function getHeader(req, name) {
+  const value = req.headers[name.toLowerCase()] || req.headers[name];
+  if (Array.isArray(value)) return value[0] || '';
+  return String(value || '');
+}
+
+function getAllowedOrigins() {
+  return (process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGIN || DEFAULT_ALLOWED_ORIGINS)
+    .split(/[,\s]+/)
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+function isOriginAllowed(origin) {
+  const allowed = getAllowedOrigins();
+  return allowed.includes('*') || allowed.includes(origin);
+}
+
+function safeTokenEqual(actual, expected) {
+  if (!actual || !expected) return false;
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length
+    && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function getBearerToken(req) {
+  const authorization = getHeader(req, 'authorization');
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+function hasValidProxyToken(req) {
+  const token = getBearerToken(req) || getHeader(req, 'x-model-proxy-token');
+  return safeTokenEqual(token, MODEL_PROXY_TOKEN);
+}
+
+function checkProxyAccess(req) {
+  if (REQUIRE_MODEL_PROXY_TOKEN) {
+    if (!MODEL_PROXY_TOKEN) {
+      return { status: 500, message: '服务端未配置 MODEL_PROXY_TOKEN，HTTP 图像识别代理默认关闭', code: 'PROXY_AUTH_NOT_CONFIGURED' };
+    }
+    if (!hasValidProxyToken(req)) {
+      return { status: 401, message: '缺少有效的图像识别代理访问凭证', code: 'PROXY_UNAUTHORIZED' };
+    }
+    return null;
+  }
+
+  const origin = getHeader(req, 'origin');
+  if (!origin || !isOriginAllowed(origin)) {
+    return { status: 403, message: '当前来源无权调用图像识别代理', code: 'ORIGIN_FORBIDDEN' };
+  }
+  return null;
+}
+
+function estimateBase64Bytes(imageBase64 = '') {
+  const raw = String(imageBase64 || '').replace(/^data:[^,]+,/, '').replace(/\s/g, '');
+  if (!raw) return 0;
+  const padding = raw.endsWith('==') ? 2 : raw.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((raw.length * 3) / 4) - padding);
+}
+
+function validatePayload(req, body = {}) {
+  const contentLength = Number(getHeader(req, 'content-length') || 0);
+  if (Number.isFinite(contentLength) && contentLength > PROXY_LIMITS.maxBodyBytes) {
+    return { status: 413, message: '请求体过大，请压缩图片后再识别', code: 'BODY_TOO_LARGE' };
+  }
+
+  if (!body.imageUrl && !body.imageBase64) {
+    return { status: 400, message: '缺少 imageBase64 或 imageUrl', code: 'IMAGE_REQUIRED' };
+  }
+
+  if (body.imageBase64 && estimateBase64Bytes(body.imageBase64) > PROXY_LIMITS.maxImageBytes) {
+    return { status: 413, message: '图片过大，请压缩到 4MB 以内后再识别', code: 'IMAGE_TOO_LARGE' };
+  }
+
+  if (body.imageUrl) {
+    const imageUrl = String(body.imageUrl);
+    if (imageUrl.length > PROXY_LIMITS.maxImageUrlLength) {
+      return { status: 400, message: '图片链接过长，请上传图片后再识别', code: 'IMAGE_URL_TOO_LONG' };
+    }
+    if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(imageUrl)
+      && estimateBase64Bytes(imageUrl) > PROXY_LIMITS.maxImageBytes) {
+      return { status: 413, message: '图片过大，请压缩到 4MB 以内后再识别', code: 'IMAGE_TOO_LARGE' };
+    }
+  }
+
+  return null;
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function getTrustedRequestIp(req) {
+  const forwarded = getHeader(req, 'x-forwarded-for');
+  const platformIp = getHeader(req, 'x-real-ip')
+    || getHeader(req, 'cf-connecting-ip')
+    || getHeader(req, 'x-vercel-forwarded-for')
+    || forwarded.split(',')[0]
+    || req.socket?.remoteAddress
+    || req.connection?.remoteAddress
+    || 'unknown';
+  return String(platformIp).split(',')[0].trim() || 'unknown';
+}
+
+function pruneProxyRateBuckets(nowMs) {
+  if (proxyRateBuckets.size < 1000) return;
+  for (const [key, bucket] of proxyRateBuckets.entries()) {
+    if (bucket.resetAt <= nowMs) proxyRateBuckets.delete(key);
+  }
+}
+
+function checkProxyRateLimit(req) {
+  const nowMs = Date.now();
+  pruneProxyRateBuckets(nowMs);
+  const key = sha256([
+    getTrustedRequestIp(req),
+    getHeader(req, 'origin') || 'server',
+    getHeader(req, 'user-agent').slice(0, 128)
+  ].join('|'));
+  const bucket = proxyRateBuckets.get(key);
+
+  if (!bucket || bucket.resetAt <= nowMs) {
+    proxyRateBuckets.set(key, { count: 1, resetAt: nowMs + PROXY_LIMITS.windowMs });
+    return null;
+  }
+
+  if (bucket.count >= PROXY_LIMITS.maxRequests) {
+    const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - nowMs) / 1000));
+    return { status: 429, message: `图片识别请求过于频繁，请 ${retryAfter} 秒后再试`, code: 'RATE_LIMITED' };
+  }
+
+  bucket.count += 1;
+  return null;
 }
 
 function unique(values = []) {
@@ -61,17 +217,34 @@ function buildVisionPrompt(hint = '') {
 }
 
 function withCors(req, res) {
-  const allowedOrigin = process.env.ALLOWED_ORIGIN || req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  const origin = getHeader(req, 'origin');
+  const allowedOrigins = getAllowedOrigins();
+  if (origin && isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else if (allowedOrigins.includes('*')) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'content-type');
+  res.setHeader('Access-Control-Allow-Headers', 'authorization,content-type,x-model-proxy-token');
   res.setHeader('Vary', 'Origin');
 }
 
 export default async function handler(req, res) {
   withCors(req, res);
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method === 'OPTIONS') {
+    const origin = getHeader(req, 'origin');
+    if (origin && !isOriginAllowed(origin)) {
+      return fail(res, 403, '当前来源无权调用图像识别代理', 'ORIGIN_FORBIDDEN');
+    }
+    return res.status(204).end();
+  }
   if (req.method !== 'POST') return fail(res, 405, 'Method Not Allowed', 'METHOD_NOT_ALLOWED');
+
+  const accessError = checkProxyAccess(req);
+  if (accessError) return fail(res, accessError.status, accessError.message, accessError.code);
+
+  const rateLimitError = checkProxyRateLimit(req);
+  if (rateLimitError) return fail(res, rateLimitError.status, rateLimitError.message, rateLimitError.code);
 
   const apiKey = process.env.HUNYUAN_API_KEY
     || process.env.TENCENT_HUNYUAN_API_KEY
@@ -84,10 +257,9 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {};
+  const payloadError = validatePayload(req, body);
+  if (payloadError) return fail(res, payloadError.status, payloadError.message, payloadError.code);
   const imageUrl = body.imageUrl || normalizeImageBase64(body.imageBase64, body.mimeType || 'image/jpeg');
-  if (!imageUrl) {
-    return fail(res, 400, '缺少 imageBase64 或 imageUrl', 'IMAGE_REQUIRED');
-  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);

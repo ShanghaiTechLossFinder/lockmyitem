@@ -179,21 +179,34 @@ function pruneClassifyRateBuckets(nowMs) {
   }
 }
 
+function firstTrustedContextValue(context = {}, keys = []) {
+  for (const key of keys) {
+    const value = context[key];
+    if (value !== undefined && value !== null && String(value).trim()) {
+      return String(value).trim();
+    }
+  }
+  return '';
+}
+
 function getClassifyRateKey(event = {}, context = {}) {
-  const serverIdentity = context.OPENID
-    || context.UNIONID
-    || context.UID
-    || event.openid
-    || event.userId
-    || '';
-  const clientIp = context.CLIENTIP || context.clientIP || event.clientIp || event.ip || '';
-  const identity = serverIdentity
-    || clientIp
-    || event.clientId
-    || event.sessionId
-    || 'anonymous';
-  const source = clientIp || context.SOURCE || 'public';
-  return sha256(`${identity}|${source}|${context.APPID || ''}`);
+  void event;
+  const serverIdentity = firstTrustedContextValue(context, [
+    'OPENID',
+    'UNIONID',
+    'UID',
+    'TCB_UUID',
+    'TcbUuid'
+  ]);
+  const clientIp = firstTrustedContextValue(context, [
+    'CLIENTIP',
+    'CLIENT_IP',
+    'SOURCE_IP',
+    'REMOTE_ADDR'
+  ]);
+  const identity = serverIdentity || (clientIp ? `ip:${clientIp}` : 'anonymous');
+  const source = firstTrustedContextValue(context, ['SOURCE', 'ENV', 'APPID']) || 'cloudbase';
+  return sha256(`${identity}|${source}|${context.APPID || context.ENV || ''}`);
 }
 
 function checkClassifyRateLimit(event = {}, context = {}) {
@@ -245,7 +258,7 @@ async function ensureRateLimitCollection() {
 
 async function checkPersistentClassifyRateLimit(event = {}, context = {}) {
   const ready = await ensureRateLimitCollection();
-  if (!ready) return null;
+  if (!ready) return checkClassifyRateLimit(event, context);
 
   const nowMs = Date.now();
   const key = getClassifyRateKey(event, context);
