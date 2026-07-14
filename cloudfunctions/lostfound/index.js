@@ -226,6 +226,24 @@ function getClassifyRateKey(event = {}, context = {}) {
   return sha256(`${identity}|${source}|${context.APPID || context.ENV || ''}`);
 }
 
+function getActorId(context = {}) {
+  return firstTrustedContextValue(context, [
+    'OPENID',
+    'UNIONID',
+    'UID',
+    'TCB_UUID',
+    'TcbUuid'
+  ]);
+}
+
+function requireActorId(context = {}) {
+  const actorId = getActorId(context);
+  if (!actorId) {
+    return { error: fail('无法识别当前用户，请刷新页面后重试', 'AUTH_REQUIRED') };
+  }
+  return { actorId };
+}
+
 function checkClassifyRateLimit(event = {}, context = {}) {
   const nowMs = Date.now();
   pruneClassifyRateBuckets(nowMs);
@@ -495,6 +513,7 @@ async function ensureUser(openid, profile = {}) {
 }
 
 async function createNotification(userOpenid, type, content, itemId, actorOpenid) {
+  if (!userOpenid) return null;
   return db.collection(COLLECTIONS.notifications).add({
     data: {
       userOpenid,
@@ -509,7 +528,9 @@ async function createNotification(userOpenid, type, content, itemId, actorOpenid
 }
 
 async function login(event, context) {
-  const user = await ensureUser(context.OPENID, event.profile || {});
+  const actor = requireActorId(context);
+  if (actor.error) return actor.error;
+  const user = await ensureUser(actor.actorId, event.profile || {});
   return ok(user);
 }
 
@@ -592,6 +613,8 @@ async function classifyImage(event, context) {
 }
 
 async function createItem(event, context) {
+  const actor = requireActorId(context);
+  if (actor.error) return actor.error;
   const payload = event.payload || {};
   if (!(payload.imageUrls || []).length && !payload.category) return fail('请上传图片或选择分类');
   let location = null;
@@ -630,7 +653,7 @@ async function createItem(event, context) {
     latitude: location ? location.latitude : customLatitude,
     longitude: location ? location.longitude : customLongitude,
     status: 'active',
-    ownerOpenid: context.OPENID,
+    ownerOpenid: actor.actorId,
     ownerName: payload.ownerName || '微信用户',
     createdAt: now(),
     updatedAt: now()
@@ -664,6 +687,8 @@ async function getItemDetail(event) {
 }
 
 async function createComment(event, context) {
+  const actor = requireActorId(context);
+  if (actor.error) return actor.error;
   const content = (event.content || '').trim();
   if (!content) return fail('评论不能为空');
   if (BAD_WORDS.some((word) => content.includes(word))) return fail('评论包含敏感词');
@@ -671,43 +696,47 @@ async function createComment(event, context) {
   const item = itemResult.data;
   const data = {
     itemId: event.itemId,
-    authorOpenid: context.OPENID,
+    authorOpenid: actor.actorId,
     authorName: event.authorName || '微信用户',
     content,
     status: 'active',
     createdAt: now()
   };
   const created = await db.collection(COLLECTIONS.comments).add({ data });
-  if (item.ownerOpenid !== context.OPENID) {
-    await createNotification(item.ownerOpenid, 'comment', `${data.authorName} 评论了你的帖子：${item.title}`, event.itemId, context.OPENID);
+  if (item.ownerOpenid !== actor.actorId) {
+    await createNotification(item.ownerOpenid, 'comment', `${data.authorName} 评论了你的帖子：${item.title}`, event.itemId, actor.actorId);
   }
   return ok({ _id: created._id, ...data });
 }
 
 async function sendThanks(event, context) {
+  const actor = requireActorId(context);
+  if (actor.error) return actor.error;
   const itemResult = await db.collection(COLLECTIONS.items).doc(event.itemId).get();
   const item = itemResult.data;
-  if (item.ownerOpenid === context.OPENID) return fail('不能感谢自己发布的帖子');
+  if (item.ownerOpenid === actor.actorId) return fail('不能感谢自己发布的帖子');
   const existed = await db.collection(COLLECTIONS.thanks)
-    .where({ itemId: event.itemId, fromOpenid: context.OPENID })
+    .where({ itemId: event.itemId, fromOpenid: actor.actorId })
     .limit(1)
     .get();
   if (existed.data.length) return ok(existed.data[0]);
   const data = {
     itemId: event.itemId,
-    fromOpenid: context.OPENID,
+    fromOpenid: actor.actorId,
     toOpenid: item.ownerOpenid,
     createdAt: now()
   };
   const created = await db.collection(COLLECTIONS.thanks).add({ data });
-  await createNotification(item.ownerOpenid, 'thanks', '有同学感谢了你发布的失物招领线索', event.itemId, context.OPENID);
+  await createNotification(item.ownerOpenid, 'thanks', '有同学感谢了你发布的失物招领线索', event.itemId, actor.actorId);
   return ok({ _id: created._id, ...data });
 }
 
 async function updateReturnStatus(event, context, returned) {
+  const actor = requireActorId(context);
+  if (actor.error) return actor.error;
   const itemResult = await db.collection(COLLECTIONS.items).doc(event.itemId).get();
   const item = itemResult.data;
-  if (item.ownerOpenid !== context.OPENID) return fail('只能操作自己的帖子', 'FORBIDDEN');
+  if (item.ownerOpenid !== actor.actorId) return fail('只能操作自己的帖子', 'FORBIDDEN');
   await db.collection(COLLECTIONS.items).doc(event.itemId).update({
     data: {
       status: returned ? 'returned' : 'active',
@@ -719,11 +748,13 @@ async function updateReturnStatus(event, context, returned) {
 }
 
 async function reportContent(event, context) {
+  const actor = requireActorId(context);
+  if (actor.error) return actor.error;
   const data = {
     targetType: event.targetType,
     targetId: event.targetId,
     reason: event.reason || '用户举报',
-    reporterOpenid: context.OPENID,
+    reporterOpenid: actor.actorId,
     status: 'open',
     createdAt: now()
   };
