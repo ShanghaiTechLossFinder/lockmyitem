@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { campusMapImage, campusMapImageBoundaries, campusMapMeta, categories, locations } from './data.js';
 import {
+  claimCloudItem,
   clearUser,
   cloudErrorMessage,
   createCloudComment,
@@ -43,6 +44,7 @@ function App() {
   const [publishDraft, setPublishDraft] = useState(null);
   const [commentsByItem, setCommentsByItem] = useState({});
   const [syncing, setSyncing] = useState(false);
+  const [claimingItemId, setClaimingItemId] = useState(null);
   const [toast, setToast] = useState('');
   const [authPrompt, setAuthPrompt] = useState(null);
 
@@ -196,29 +198,48 @@ function App() {
   }
 
   function submitClaim(item) {
+    if (claimingItemId) return;
     requireAuth('认领物品', async (user) => {
-      const claim = {
-        id: `claim_${Date.now()}`,
-        userId: user.id,
-        nickName: user.nickName,
-        contact: user.contact,
-        createdAt: new Date().toISOString()
+      setClaimingItemId(item.id);
+      const claimedAt = new Date().toISOString();
+      const fallbackItem = {
+        ...item,
+        status: 'returned',
+        returnedAt: claimedAt,
+        claimedAt,
+        claimantName: user.nickName,
+        claimantContact: user.contact,
+        claims: [
+          ...(item.claims || []),
+          {
+            id: `claim_${Date.now()}`,
+            userId: user.id,
+            nickName: user.nickName,
+            contact: user.contact,
+            createdAt: claimedAt
+          }
+        ]
       };
-      const content = `${user.nickName} 申请认领：${user.contact}`;
       try {
-        const comment = await createCloudComment(item.id, content, user);
-        setCommentsByItem((current) => ({
-          ...current,
-          [item.id]: [...(current[item.id] || []), comment]
-        }));
-        setToast('认领申请已同步提交');
+        const { item: claimedItem, comment } = await claimCloudItem(item.id, user);
+        const nextItem = claimedItem || fallbackItem;
+        setItems((current) => current.map((entry) => (entry.id === item.id ? nextItem : entry)));
+        if (comment) {
+          setCommentsByItem((current) => ({
+            ...current,
+            [item.id]: [...(current[item.id] || []), comment]
+          }));
+        }
+        setToast('认领成功，物品已移入已找到');
       } catch (error) {
         setItems((current) => current.map((entry) => (
           entry.id === item.id
-            ? { ...entry, claims: [...(entry.claims || []), claim] }
+            ? fallbackItem
             : entry
         )));
-        setToast(`云端提交失败，已暂存本机：${cloudErrorMessage(error)}`);
+        setToast(`云端认领失败，已暂存本机：${cloudErrorMessage(error)}`);
+      } finally {
+        setClaimingItemId(null);
       }
     });
   }
@@ -243,7 +264,15 @@ function App() {
       await setCloudReturnStatus(id, true);
       setItems((current) => current.map((item) => (
         item.id === id
-          ? { ...item, status: 'returned', returnedAt: new Date().toISOString() }
+          ? {
+              ...item,
+              status: 'returned',
+              returnedAt: new Date().toISOString(),
+              claimedAt: null,
+              claimedByOpenid: '',
+              claimantName: '',
+              claimantContact: ''
+            }
           : item
       )));
       setToast('已同步为找回');
@@ -257,7 +286,15 @@ function App() {
       await setCloudReturnStatus(id, false);
       setItems((current) => current.map((item) => (
         item.id === id
-          ? { ...item, status: 'active', returnedAt: null }
+          ? {
+              ...item,
+              status: 'active',
+              returnedAt: null,
+              claimedAt: null,
+              claimedByOpenid: '',
+              claimantName: '',
+              claimantContact: ''
+            }
           : item
       )));
       setToast('已同步撤回');
@@ -350,6 +387,7 @@ function App() {
           items={items}
           comments={commentsByItem[selectedItem.id] || []}
           onBack={backFromDetail}
+          claiming={claimingItemId === selectedItem.id}
           onClaim={() => submitClaim(selectedItem)}
           onMarkReturned={() => markReturned(selectedItem.id)}
           onUndoReturned={() => undoReturned(selectedItem.id)}
@@ -510,6 +548,7 @@ function ReturnedPage({ items, total, onOpen }) {
               <span className="item-copy">
                 <strong className="title">{item.title}</strong>
                 <span className="meta">{item.category}{locationText(item) ? ` · ${locationText(item)}` : ''}</span>
+                {claimantText(item) && <span className="meta claimed-meta">{claimantText(item)}</span>}
               </span>
             </button>
           ))}
@@ -1287,7 +1326,7 @@ function AuthModal({ actionLabel, onClose, onSubmit }) {
   );
 }
 
-function DetailPage({ item, items, comments = [], onBack, onClaim, onComment }) {
+function DetailPage({ item, items, comments = [], onBack, claiming = false, onClaim, onComment }) {
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const matches = findPotentialMatches(item, items);
@@ -1317,13 +1356,21 @@ function DetailPage({ item, items, comments = [], onBack, onClaim, onComment }) 
             <span className="detail-kicker">{item.type === 'lost' ? '寻物详情' : '招领详情'}</span>
             <h1 className="title">{item.title}</h1>
           </div>
-          <span className={`type-pill ${item.type}`}>{item.type === 'lost' ? '寻物中' : '招领中'}</span>
+          <span className={`type-pill ${item.status === 'returned' ? 'returned' : item.type}`}>
+            {item.status === 'returned' ? '已回家' : (item.type === 'lost' ? '寻物中' : '招领中')}
+          </span>
         </div>
         <p className="desc">{item.description}</p>
         <div className="tag-row">
           <span className="tag active">{item.category}</span>
           {(item.tags || []).filter((tag) => tag !== item.category).map((tag) => <span key={tag} className="tag">{tag}</span>)}
         </div>
+        {claimantText(item) && (
+          <div className="claimant-note">
+            <span>领取人</span>
+            <strong>{claimantText(item)}</strong>
+          </div>
+        )}
       </div>
 
       <div className="card location-card">
@@ -1348,8 +1395,8 @@ function DetailPage({ item, items, comments = [], onBack, onClaim, onComment }) 
 
       {item.type === 'found' && item.status === 'active' && (
         <div className="detail-action-row">
-          <button className="button-primary detail-claim-button" type="button" onClick={onClaim}>
-            我要认领
+          <button className="button-primary detail-claim-button" type="button" onClick={onClaim} disabled={claiming}>
+            {claiming ? '认领中' : '我要认领'}
           </button>
         </div>
       )}
@@ -1506,7 +1553,15 @@ function locationText(item) {
 function itemMeta(item) {
   const date = formatDate(item.createdAt);
   const location = locationText(item);
-  return [item.category, location, date].filter(Boolean).join(' · ');
+  const claimant = item.status === 'returned' ? claimantText(item) : '';
+  return [item.category, location, claimant, date].filter(Boolean).join(' · ');
+}
+
+function claimantText(item) {
+  const name = String(item.claimantName || '').trim();
+  const contact = String(item.claimantContact || '').trim();
+  if (!name && !contact) return '';
+  return `领取人：${[name, contact].filter(Boolean).join(' · ')}`;
 }
 
 export default App;

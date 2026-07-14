@@ -504,6 +504,12 @@ p {
   border-color: #f1cf8f;
 }
 
+.type-pill.returned {
+  color: var(--notice-green);
+  background: #e8f3ef;
+  border-color: #b7d9cf;
+}
+
 .item-desc {
   display: -webkit-box;
   margin-top: 6px;
@@ -660,6 +666,12 @@ p {
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.claimed-meta {
+  color: var(--green);
+  font-weight: 800;
+  white-space: normal;
 }
 
 .card {
@@ -1511,6 +1523,28 @@ p {
   background: var(--green);
 }
 
+.claimant-note {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  color: var(--green);
+  background: #eef7f4;
+  border: 1px solid #c8e3dc;
+  border-radius: 10px;
+}
+
+.claimant-note span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.claimant-note strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
 .location-card {
   overflow: hidden;
 }
@@ -1572,6 +1606,11 @@ p {
   border-radius: 14px;
   font-size: 17px;
   font-weight: 800;
+}
+
+.detail-claim-button:disabled {
+  cursor: default;
+  opacity: 0.65;
 }
 
 .section-title {

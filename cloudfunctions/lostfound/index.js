@@ -897,10 +897,64 @@ async function updateReturnStatus(event, context, returned) {
     data: {
       status: returned ? 'returned' : 'active',
       returnedAt: returned ? now() : null,
+      claimedAt: null,
+      claimedByOpenid: null,
+      claimantName: '',
+      claimantContact: '',
       updatedAt: now()
     }
   });
   return ok({ itemId: event.itemId, status: returned ? 'returned' : 'active' });
+}
+
+function cleanClaimField(value = '', fallback = '', maxLength = 80) {
+  const text = String(value || '').replace(/[\r\n\t]+/g, ' ').trim();
+  return (text || fallback).slice(0, maxLength);
+}
+
+async function claimItem(event, context) {
+  const actor = requireActorId(context, event);
+  if (actor.error) return actor.error;
+  if (!event.itemId) return fail('缺少 itemId');
+
+  const itemResult = await db.collection(COLLECTIONS.items).doc(event.itemId).get();
+  const item = itemResult.data;
+  if (!item) return fail('物品不存在', 'ITEM_NOT_FOUND');
+  if (item.type !== 'found') return fail('只能认领招领物品', 'INVALID_ITEM_TYPE');
+  if (item.status === 'returned') return fail('该物品已回家，不能重复认领', 'ALREADY_RETURNED');
+  if (item.ownerOpenid === actor.actorId) return fail('不能认领自己发布的物品', 'FORBIDDEN');
+
+  const claimantName = cleanClaimField(event.claimantName || event.nickName, '网页用户', 40);
+  const claimantContact = cleanClaimField(event.claimantContact || event.contact, '', 100);
+  const claimedAt = now();
+  const updateData = {
+    status: 'returned',
+    returnedAt: claimedAt,
+    claimedAt,
+    claimedByOpenid: actor.actorId,
+    claimantName,
+    claimantContact,
+    updatedAt: claimedAt
+  };
+
+  await db.collection(COLLECTIONS.items).doc(event.itemId).update({ data: updateData });
+
+  const commentData = {
+    itemId: event.itemId,
+    authorOpenid: actor.actorId,
+    authorName: claimantName,
+    content: claimantContact ? `${claimantName} 已认领：${claimantContact}` : `${claimantName} 已认领`,
+    status: 'active',
+    createdAt: claimedAt
+  };
+  const comment = await db.collection(COLLECTIONS.comments).add({ data: commentData });
+  await createNotification(item.ownerOpenid, 'claim', `${claimantName} 已认领：${item.title}`, event.itemId, actor.actorId);
+
+  const hydrated = await hydrateItemImages([{ _id: event.itemId, ...item, ...updateData }]);
+  return ok({
+    item: hydrated[0],
+    comment: { _id: comment._id, ...commentData }
+  });
 }
 
 async function reportContent(event, context) {
@@ -938,6 +992,8 @@ exports.main = async (event = {}) => {
         return await createComment(event, context);
       case 'sendThanks':
         return await sendThanks(event, context);
+      case 'claimItem':
+        return await claimItem(event, context);
       case 'markReturned':
         return await updateReturnStatus(event, context, true);
       case 'undoReturned':

@@ -195,6 +195,10 @@ function normalizeItem(raw = {}) {
     createdAt: normalizeDate(raw.createdAt),
     updatedAt: normalizeDate(raw.updatedAt || raw.createdAt),
     returnedAt: raw.returnedAt ? normalizeDate(raw.returnedAt, '') : raw.returnedAt,
+    claimedAt: raw.claimedAt ? normalizeDate(raw.claimedAt, '') : raw.claimedAt,
+    claimedByOpenid: raw.claimedByOpenid || raw.claimedBy || '',
+    claimantName: raw.claimantName || raw.claimedByName || '',
+    claimantContact: raw.claimantContact || raw.claimedByContact || '',
     claims: raw.claims || []
   };
 }
@@ -393,6 +397,18 @@ export async function createCloudComment(itemId, content, currentUser) {
     authorName: currentUser?.nickName || '网页用户'
   }, 15000);
   return normalizeComment(data);
+}
+
+export async function claimCloudItem(itemId, currentUser) {
+  const data = await callLostfound('claimItem', {
+    itemId,
+    claimantName: currentUser?.nickName || '网页用户',
+    claimantContact: currentUser?.contact || ''
+  }, 15000);
+  return {
+    item: data.item ? normalizeItem(data.item) : null,
+    comment: data.comment ? normalizeComment(data.comment) : null
+  };
 }
 
 export async function setCloudReturnStatus(itemId, returned) {
