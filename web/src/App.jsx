@@ -378,7 +378,11 @@ function App() {
     try {
       promptEvent.prompt();
       const choice = await promptEvent.userChoice;
-      setToast(choice?.outcome === 'accepted' ? '正在添加到桌面' : '已取消添加到桌面');
+      if (choice?.outcome === 'accepted') {
+        setToast('正在添加到桌面');
+      } else {
+        setShowPwaGuide(true);
+      }
     } catch (error) {
       setShowPwaGuide(true);
     }
