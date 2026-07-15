@@ -1927,6 +1927,32 @@ p {
   outline: 0;
 }
 
+.auth-email-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.auth-email-row input {
+  min-width: 0;
+}
+
+.auth-email-row .auth-email-suffix {
+  display: flex;
+  align-items: center;
+  height: 43px;
+  margin: 0;
+  padding: 0 10px;
+  color: #526669;
+  background: #EEF7F1;
+  border: 1px solid #CBE2D5;
+  border-radius: 12px;
+  font-size: 12.5px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .auth-password-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 72px;

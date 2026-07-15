@@ -38,6 +38,8 @@ const tabItems = [
   { key: 'me', text: '我的', icon: meIcon, activeIcon: meActiveIcon }
 ];
 
+const SCHOOL_EMAIL_DOMAIN = 'shanghaitech.edu.cn';
+
 function App() {
   const [items, setItems] = useState(() => loadItems());
   const [currentUser, setCurrentUser] = useState(() => loadUser());
@@ -1264,15 +1266,22 @@ function AuthModal({ actionLabel, onClose, onSubmit, onSendCode }) {
   const [submitting, setSubmitting] = useState(false);
 
   function update(field, value) {
-    setForm((current) => ({ ...current, [field]: value }));
+    const nextValue = field === 'email' ? normalizeEmailPrefix(value) : value;
+    setForm((current) => ({ ...current, [field]: nextValue }));
     setError('');
     setStatus('');
   }
 
-  function normalizeEmail() {
-    const raw = form.email.trim().toLowerCase();
+  function normalizeEmailPrefix(value = '') {
+    const raw = String(value || '').trim().toLowerCase();
     if (!raw) return '';
-    return raw.includes('@') ? raw : `${raw}@shanghaitech.edu.cn`;
+    const prefix = raw.includes('@') ? raw.split('@')[0] : raw;
+    return prefix.replace(/[^a-z0-9._-]/g, '');
+  }
+
+  function normalizeEmail() {
+    const prefix = normalizeEmailPrefix(form.email);
+    return prefix ? `${prefix}@${SCHOOL_EMAIL_DOMAIN}` : '';
   }
 
   function switchMode(nextMode) {
@@ -1291,8 +1300,8 @@ function AuthModal({ actionLabel, onClose, onSubmit, onSendCode }) {
 
   async function sendCode() {
     const email = normalizeEmail();
-    if (!email || !email.endsWith('@shanghaitech.edu.cn')) {
-      setError('请使用上科大邮箱：name@shanghaitech.edu.cn');
+    if (!email) {
+      setError('请填写上科大邮箱前缀');
       return;
     }
     setSendingCode(true);
@@ -1300,7 +1309,7 @@ function AuthModal({ actionLabel, onClose, onSubmit, onSendCode }) {
     setStatus('');
     try {
       await onSendCode(email, mode === 'register' ? 'register' : 'login');
-      setForm((current) => ({ ...current, email }));
+      setForm((current) => ({ ...current, email: email.split('@')[0] }));
       setStatus('验证码已发送，请查收上科大邮箱');
     } catch (sendError) {
       setError(sendError?.message || '验证码发送失败');
@@ -1313,8 +1322,8 @@ function AuthModal({ actionLabel, onClose, onSubmit, onSendCode }) {
     event.preventDefault();
     const email = normalizeEmail();
     const nickName = form.nickName.trim();
-    if (!email || !email.endsWith('@shanghaitech.edu.cn')) {
-      setError('请使用上科大邮箱：name@shanghaitech.edu.cn');
+    if (!email) {
+      setError('请填写上科大邮箱前缀');
       return;
     }
     if (mode === 'register' && !nickName) {
@@ -1390,7 +1399,10 @@ function AuthModal({ actionLabel, onClose, onSubmit, onSendCode }) {
 
         <label className="auth-field">
           <span>上科大邮箱</span>
-          <input value={form.email} placeholder="name@shanghaitech.edu.cn" onChange={(event) => update('email', event.target.value)} />
+          <div className="auth-email-row">
+            <input value={form.email} placeholder="name" autoCapitalize="none" autoComplete="username" onChange={(event) => update('email', event.target.value)} />
+            <span className="auth-email-suffix">@{SCHOOL_EMAIL_DOMAIN}</span>
+          </div>
         </label>
 
         {(mode === 'register' || method === 'password') && (
