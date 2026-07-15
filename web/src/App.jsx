@@ -40,6 +40,28 @@ const tabItems = [
 
 const SCHOOL_EMAIL_DOMAIN = 'shanghaitech.edu.cn';
 const EMAIL_CODE_COOLDOWN_SECONDS = 30;
+const LOCATION_DETAIL_HINT = '可补充入口、楼层、靠窗/靠路侧、附近标志物等细节。';
+
+function defaultLocationDetail(location) {
+  const raw = String(location?.mapDescription || location?.guide || '').trim();
+  if (!raw) return LOCATION_DETAIL_HINT;
+
+  const prefixes = [
+    `${location.name}，${location.area}；`,
+    `${location.name}，${location.area}。`,
+    `${location.name}，${location.area}`,
+    `${location.name}，`,
+    `${location.name}；`,
+    `${location.name}。`,
+    location.name
+  ].filter(Boolean);
+
+  const matchedPrefix = prefixes.find((prefix) => raw.startsWith(prefix));
+  const text = (matchedPrefix ? raw.slice(matchedPrefix.length) : raw)
+    .replace(/^[，,；;。、\s]+/, '')
+    .trim();
+  return text || LOCATION_DETAIL_HINT;
+}
 
 function App() {
   const [items, setItems] = useState(() => loadItems());
@@ -687,7 +709,7 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
     visualDescription: initialDraft?.visualDescription || '',
     rawPredictions: [...(initialDraft?.rawPredictions || [])],
     locationId: initialDraft?.locationId || defaultLocation.id,
-    locationDetail: initialDraft?.locationDetail || defaultLocation.mapDescription || defaultLocation.guide,
+    locationDetail: initialDraft?.locationDetail || defaultLocationDetail(defaultLocation),
     locationImages: [...(initialDraft?.locationImages || [])],
     image: initialDraft?.image || '',
     ownerName: currentUser?.nickName || initialDraft?.ownerName || '网页用户'
@@ -747,7 +769,7 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
       locationId,
       locationDetail: current.locationId === locationId
         ? current.locationDetail
-        : location.mapDescription || location.guide
+        : defaultLocationDetail(location)
     }));
   }
 
@@ -946,7 +968,6 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
                 <span>地点区域：</span>
                 <strong>{selectedLocation.area}</strong>
               </div>
-              <p className="location-confirm-note">{selectedLocation.guide}</p>
             </div>
             <textarea
               className="field textarea location-detail-field"

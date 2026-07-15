@@ -305,7 +305,7 @@ function locationPayload(locationId) {
     locationId: location.id,
     locationName: location.name,
     locationArea: location.area,
-    locationDetail: location.mapDescription || location.guide || '',
+    locationDetail: '',
     mapX: location.mapX,
     mapY: location.mapY,
     latitude: location.latitude,
