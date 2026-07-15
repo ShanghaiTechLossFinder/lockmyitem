@@ -906,11 +906,13 @@ async function getUserByActorId(actorId = '') {
 }
 
 function userEmail(user = {}) {
-  return normalizeShanghaiTechEmail(user.email || user.contact || '');
+  const profile = user || {};
+  return normalizeShanghaiTechEmail(profile.email || profile.contact || '');
 }
 
 function userDisplayName(user = {}, fallback = '网页用户') {
-  return sanitizeNickName(user.nickName || user.emailPrefix || fallback, fallback);
+  const profile = user || {};
+  return sanitizeNickName(profile.nickName || profile.emailPrefix || fallback, fallback);
 }
 
 async function sendTransactionalEmail({ to, subject, text, html }) {
