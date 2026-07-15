@@ -81,6 +81,11 @@ const AUTH_CONFIG = {
     || 'lockmyitem-dev-token-secret'
 };
 
+const MATCH_EMAIL_CONFIG = {
+  threshold: positiveNumber(process.env.MATCH_EMAIL_THRESHOLD, 76),
+  maxRecipients: positiveNumber(process.env.MATCH_EMAIL_MAX_RECIPIENTS, 5)
+};
+
 const classifyRateBuckets = new Map();
 let rateLimitCollectionReady = false;
 let rateLimitCollectionDisabled = false;
@@ -145,6 +150,87 @@ function toArray(value) {
 
 function unique(list) {
   return Array.from(new Set(toArray(list).map((item) => String(item || '').trim()).filter(Boolean)));
+}
+
+function tokenizeForMatch(text = '') {
+  return unique(
+    String(text || '')
+      .toLowerCase()
+      .replace(/[^\w\u4e00-\u9fa5]+/g, ' ')
+      .split(/\s+/)
+      .filter((word) => word.length >= 2)
+  );
+}
+
+function itemMatchSignature(item = {}) {
+  return unique([
+    item.category,
+    ...toArray(item.aiTags),
+    ...toArray(item.semanticTags),
+    ...toArray(item.yoloObjects),
+    ...toArray(item.tags),
+    ...tokenizeForMatch(`${item.title || ''} ${item.description || ''} ${item.visualDescription || ''}`)
+  ]);
+}
+
+function sharedCount(a = [], b = []) {
+  const target = new Set(b);
+  return a.filter((entry) => target.has(entry)).length;
+}
+
+function scoreLostFoundMatch(lostItem = {}, foundItem = {}) {
+  const lostSignature = itemMatchSignature(lostItem);
+  const foundSignature = itemMatchSignature(foundItem);
+  const reasons = [];
+  let score = 0;
+
+  if (lostItem.category && foundItem.category && lostItem.category === foundItem.category) {
+    score += 34;
+    reasons.push(`同为${lostItem.category}`);
+  }
+
+  const sharedTags = lostSignature.filter((entry) => foundSignature.includes(entry));
+  if (sharedTags.length) {
+    score += Math.min(sharedTags.length * 9, 36);
+    reasons.push(`特征相近：${sharedTags.slice(0, 4).join('、')}`);
+  }
+
+  if (lostItem.locationId && foundItem.locationId && lostItem.locationId === foundItem.locationId) {
+    score += 12;
+    reasons.push('地点一致');
+  } else if (lostItem.locationName && foundItem.locationName && lostItem.locationName === foundItem.locationName) {
+    score += 10;
+    reasons.push('地点相近');
+  }
+
+  const lostText = tokenizeForMatch(`${lostItem.title || ''} ${lostItem.description || ''}`);
+  const foundText = tokenizeForMatch(`${foundItem.title || ''} ${foundItem.description || ''}`);
+  const textHits = sharedCount(lostText, foundText);
+  if (textHits) {
+    score += Math.min(textHits * 5, 17);
+  }
+
+  return {
+    similarity: Math.min(score, 99),
+    reasons: unique(reasons).slice(0, 3)
+  };
+}
+
+function itemLocationText(item = {}) {
+  return unique([
+    item.locationName,
+    item.locationArea,
+    item.locationDetail || item.locationGuide
+  ]).join('，') || '未填写地点';
+}
+
+function escapeHtml(value = '') {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function parseJsonContent(content = '') {
@@ -807,10 +893,32 @@ async function getEmailUser(email) {
   return (result.data || [])[0] || null;
 }
 
-async function sendEmailViaSmtp(to, code) {
+async function getUserByActorId(actorId = '') {
+  const id = String(actorId || '').trim();
+  if (!id) return null;
+  try {
+    const result = await db.collection(COLLECTIONS.users).where({ _openid: id }).limit(1).get();
+    return (result.data || [])[0] || null;
+  } catch (error) {
+    console.warn('Failed to load user for email notification.', error && (error.message || error));
+    return null;
+  }
+}
+
+function userEmail(user = {}) {
+  return normalizeShanghaiTechEmail(user.email || user.contact || '');
+}
+
+function userDisplayName(user = {}, fallback = '网页用户') {
+  return sanitizeNickName(user.nickName || user.emailPrefix || fallback, fallback);
+}
+
+async function sendTransactionalEmail({ to, subject, text, html }) {
   if (!AUTH_CONFIG.smtpHost || !AUTH_CONFIG.smtpUser || !AUTH_CONFIG.smtpPass || !AUTH_CONFIG.smtpFrom) {
     throw new Error('邮件服务未配置，请在云函数环境变量中配置 SMTP_HOST/SMTP_USER/SMTP_PASS/SMTP_FROM');
   }
+  const recipient = normalizeShanghaiTechEmail(to);
+  if (!recipient) throw new Error('缺少有效的上科大邮箱收件人');
   let nodemailer;
   try {
     nodemailer = require('nodemailer');
@@ -828,10 +936,19 @@ async function sendEmailViaSmtp(to, code) {
   });
   await transporter.sendMail({
     from: AUTH_CONFIG.smtpFrom,
+    to: recipient,
+    subject,
+    text,
+    html
+  });
+}
+
+async function sendEmailViaSmtp(to, code) {
+  await sendTransactionalEmail({
     to,
     subject: 'LockMyItem 上科大失物招领验证码',
     text: `你的验证码是 ${code}，10 分钟内有效。若非本人操作，请忽略本邮件。`,
-    html: `<p>你的验证码是：</p><p style="font-size:28px;font-weight:700;letter-spacing:4px;">${code}</p><p>10 分钟内有效。若非本人操作，请忽略本邮件。</p>`
+    html: `<p>你的验证码是：</p><p style="font-size:28px;font-weight:700;letter-spacing:4px;">${escapeHtml(code)}</p><p>10 分钟内有效。若非本人操作，请忽略本邮件。</p>`
   });
 }
 
@@ -987,6 +1104,113 @@ async function createNotification(userOpenid, type, content, itemId, actorOpenid
   });
 }
 
+async function notifyOwnerItemClaimed(item = {}, claimantUser = {}, claimData = {}) {
+  const ownerUser = await getUserByActorId(item.ownerOpenid);
+  const ownerEmail = userEmail(ownerUser);
+  if (!ownerEmail) return { sent: false, reason: 'OWNER_EMAIL_MISSING' };
+
+  const claimantName = claimData.claimantName || userDisplayName(claimantUser);
+  const claimantEmail = userEmail(claimantUser) || normalizeShanghaiTechEmail(claimData.claimantContact);
+  const title = item.title || '未命名物品';
+  const location = itemLocationText(item);
+  const subject = `LockMyItem：你的招领物品「${title}」已被认领`;
+  const text = [
+    `你好，${userDisplayName(ownerUser)}：`,
+    '',
+    `你发布的招领物品「${title}」已被 ${claimantName} 认领。`,
+    `领取者账号/邮箱：${claimantEmail || claimData.claimantContact || '未提供'}`,
+    `物品地点：${location}`,
+    '',
+    '如有疑问，请回到 LockMyItem 查看详情。'
+  ].join('\n');
+  const html = `
+    <p>你好，${escapeHtml(userDisplayName(ownerUser))}：</p>
+    <p>你发布的招领物品 <strong>「${escapeHtml(title)}」</strong> 已被 <strong>${escapeHtml(claimantName)}</strong> 认领。</p>
+    <ul>
+      <li>领取者账号/邮箱：${escapeHtml(claimantEmail || claimData.claimantContact || '未提供')}</li>
+      <li>物品地点：${escapeHtml(location)}</li>
+    </ul>
+    <p>如有疑问，请回到 LockMyItem 查看详情。</p>
+  `;
+
+  await sendTransactionalEmail({ to: ownerEmail, subject, text, html });
+  return { sent: true, to: ownerEmail };
+}
+
+async function notifyLostOwnersAboutFoundMatch(foundItem = {}, finderUser = {}) {
+  if (foundItem.type !== 'found' || foundItem.status !== 'active') return [];
+  const finderEmail = userEmail(finderUser);
+  const finderName = userDisplayName(finderUser, foundItem.ownerName || '招领发布者');
+  const result = await db.collection(COLLECTIONS.items)
+    .where({ type: 'lost', status: 'active' })
+    .orderBy('createdAt', 'desc')
+    .limit(80)
+    .get();
+
+  const matches = (result.data || [])
+    .filter((lostItem) => lostItem.ownerOpenid && lostItem.ownerOpenid !== foundItem.ownerOpenid)
+    .map((lostItem) => {
+      const match = scoreLostFoundMatch(lostItem, foundItem);
+      return { lostItem, ...match };
+    })
+    .filter((entry) => entry.similarity >= MATCH_EMAIL_CONFIG.threshold)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, MATCH_EMAIL_CONFIG.maxRecipients);
+
+  const sent = [];
+  for (const match of matches) {
+    const lostOwner = await getUserByActorId(match.lostItem.ownerOpenid);
+    const lostOwnerEmail = userEmail(lostOwner);
+    if (!lostOwnerEmail) continue;
+    const lostTitle = match.lostItem.title || '你的寻物线索';
+    const foundTitle = foundItem.title || '一件招领物品';
+    const location = itemLocationText(foundItem);
+    const reasonText = match.reasons.length ? match.reasons.join('、') : '物品特征相似';
+    const subject = `LockMyItem：可能找到你的「${lostTitle}」`;
+    const text = [
+      `你好，${userDisplayName(lostOwner)}：`,
+      '',
+      `有一条新的招领信息和你的寻物「${lostTitle}」相似度较高。`,
+      `招领物品：${foundTitle}`,
+      `匹配相似度：${match.similarity}%`,
+      `匹配理由：${reasonText}`,
+      `招领地点：${location}`,
+      `招领发布者：${finderName}`,
+      `发布者邮箱：${finderEmail || '未提供'}`,
+      '',
+      '请回到 LockMyItem 查看详情并确认是否为你的物品。'
+    ].join('\n');
+    const html = `
+      <p>你好，${escapeHtml(userDisplayName(lostOwner))}：</p>
+      <p>有一条新的招领信息和你的寻物 <strong>「${escapeHtml(lostTitle)}」</strong> 相似度较高。</p>
+      <ul>
+        <li>招领物品：${escapeHtml(foundTitle)}</li>
+        <li>匹配相似度：${escapeHtml(String(match.similarity))}%</li>
+        <li>匹配理由：${escapeHtml(reasonText)}</li>
+        <li>招领地点：${escapeHtml(location)}</li>
+        <li>招领发布者：${escapeHtml(finderName)}</li>
+        <li>发布者邮箱：${escapeHtml(finderEmail || '未提供')}</li>
+      </ul>
+      <p>请回到 LockMyItem 查看详情并确认是否为你的物品。</p>
+    `;
+
+    try {
+      await sendTransactionalEmail({ to: lostOwnerEmail, subject, text, html });
+      await createNotification(
+        match.lostItem.ownerOpenid,
+        'match',
+        `新的招领「${foundTitle}」可能匹配你的寻物「${lostTitle}」`,
+        foundItem._id || foundItem.id,
+        foundItem.ownerOpenid
+      ).catch(() => null);
+      sent.push({ itemId: match.lostItem._id, to: lostOwnerEmail, similarity: match.similarity });
+    } catch (error) {
+      console.warn('Failed to send match email notification.', error && (error.message || error));
+    }
+  }
+  return sent;
+}
+
 async function login(event, context) {
   const actor = requireActorId(context, event);
   if (actor.error) return actor.error;
@@ -1126,6 +1350,12 @@ async function createItem(event, context) {
   };
   const created = await db.collection(COLLECTIONS.items).add({ data });
   const hydrated = await hydrateItemImages([{ _id: created._id, ...data }]);
+  if (data.type === 'found') {
+    const finderUser = await getUserByActorId(actor.actorId);
+    await notifyLostOwnersAboutFoundMatch(hydrated[0], finderUser).catch((error) => {
+      console.warn('Failed to send found-match email notifications.', error && (error.message || error));
+    });
+  }
   return ok(hydrated[0]);
 }
 
@@ -1237,8 +1467,10 @@ async function claimItem(event, context) {
   if (item.status === 'returned') return fail('该物品已回家，不能重复认领', 'ALREADY_RETURNED');
   if (item.ownerOpenid === actor.actorId) return fail('不能认领自己发布的物品', 'FORBIDDEN');
 
-  const claimantName = cleanClaimField(event.claimantName || event.nickName, '网页用户', 40);
-  const claimantContact = cleanClaimField(event.claimantContact || event.contact, '', 100);
+  const claimantUser = await getUserByActorId(actor.actorId);
+  const claimantEmail = userEmail(claimantUser);
+  const claimantName = cleanClaimField(event.claimantName || claimantUser?.nickName || event.nickName, '网页用户', 40);
+  const claimantContact = cleanClaimField(claimantEmail || event.claimantContact || event.contact, '', 100);
   const claimedAt = now();
   const updateData = {
     status: 'returned',
@@ -1262,6 +1494,9 @@ async function claimItem(event, context) {
   };
   const comment = await db.collection(COLLECTIONS.comments).add({ data: commentData });
   await createNotification(item.ownerOpenid, 'claim', `${claimantName} 已认领：${item.title}`, event.itemId, actor.actorId);
+  await notifyOwnerItemClaimed(item, claimantUser, { claimantName, claimantContact }).catch((error) => {
+    console.warn('Failed to send claim email notification.', error && (error.message || error));
+  });
 
   const hydrated = await hydrateItemImages([{ _id: event.itemId, ...item, ...updateData }]);
   return ok({
