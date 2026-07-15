@@ -671,17 +671,6 @@ function MePage({ items, stats, currentUser, onPublish, onOpen, onMarkReturned, 
         )}
       </div>
 
-      <div className="quick-actions">
-        <button className="quick-card secondary" type="button">
-          <strong className="quick-title">消息中心</strong>
-          <span className="quick-subtitle">查看评论与提醒</span>
-        </button>
-        <button className="quick-card primary" type="button" onClick={onPublish}>
-          <strong className="quick-title">继续发布</strong>
-          <span className="quick-subtitle">上传线索或寻物</span>
-        </button>
-      </div>
-
       <div className="section-head list-head">
         <div>
           <span className="section-kicker">发布记录</span>

@@ -121,8 +121,6 @@ p {
 .form-title,
 .section-kicker,
 .section-note,
-.quick-title,
-.quick-subtitle,
 .empty-title,
 .empty-copy,
 .type-pill,
@@ -983,52 +981,6 @@ p {
   border-radius: 6px;
   font-weight: 900;
   line-height: 39px;
-}
-
-.quick-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px;
-  margin: 9px 0 14px;
-}
-
-.quick-card {
-  min-width: 0;
-  height: 62px;
-  margin: 0;
-  padding: 10px 11px;
-  border-radius: 8px;
-  line-height: 1.25;
-  text-align: left;
-}
-
-.quick-card.primary {
-  color: #ffffff;
-  background: #2d7567;
-  box-shadow: 0 6px 14px rgba(45, 117, 103, 0.16);
-}
-
-.quick-card.secondary {
-  color: #2d7567;
-  background: #e8f3ef;
-  border: 1px solid #d6e8e2;
-}
-
-.quick-title {
-  overflow: hidden;
-  font-size: 15px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.quick-subtitle {
-  margin-top: 5px;
-  overflow: hidden;
-  font-size: 12px;
-  opacity: 0.78;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .list-head {
