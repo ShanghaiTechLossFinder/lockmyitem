@@ -49,7 +49,7 @@ function isStandaloneDisplay() {
 
 function pwaGuideLines() {
   if (typeof navigator === 'undefined') {
-    return ['在浏览器菜单中选择“添加到主屏幕”或“安装应用”。'];
+    return ['在浏览器菜单中选择“添加到主屏幕”或“添加到桌面”。'];
   }
   const userAgent = navigator.userAgent || '';
   if (/MicroMessenger/i.test(userAgent)) {
@@ -65,7 +65,7 @@ function pwaGuideLines() {
     ];
   }
   return [
-    '点击浏览器菜单里的“添加到主屏幕”或“安装应用”。',
+    '点击浏览器菜单里的“添加到主屏幕”或“添加到桌面”。',
     '添加后可以从手机桌面直接打开 LockMyItem。'
   ];
 }
