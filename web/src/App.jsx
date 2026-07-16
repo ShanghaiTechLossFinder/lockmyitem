@@ -349,7 +349,15 @@ function App() {
 
   function submitClaim(item) {
     if (claimingItemId) return;
+    if (itemBelongsToCurrentUser(item, currentUser, currentClientId)) {
+      setToast('不能认领自己发布的招领物品');
+      return;
+    }
     requireAuth('认领物品', async (user) => {
+      if (itemBelongsToCurrentUser(item, user, currentClientId)) {
+        setToast('不能认领自己发布的招领物品');
+        return;
+      }
       setClaimingItemId(item.id);
       const claimedAt = new Date().toISOString();
       const fallbackItem = {
@@ -382,12 +390,17 @@ function App() {
         }
         setToast('认领成功，物品已移入已找到');
       } catch (error) {
+        const message = cloudErrorMessage(error);
+        if (/自己发布|FORBIDDEN|ALREADY_RETURNED|已回家|重复认领/.test(message)) {
+          setToast(message);
+          return;
+        }
         setItems((current) => current.map((entry) => (
           entry.id === item.id
             ? fallbackItem
             : entry
         )));
-        setToast(`云端认领失败，已暂存本机：${cloudErrorMessage(error)}`);
+        setToast(`云端认领失败，已暂存本机：${message}`);
       } finally {
         setClaimingItemId(null);
       }
@@ -575,6 +588,7 @@ function App() {
           comments={commentsByItem[selectedItem.id] || []}
           onBack={backFromDetail}
           claiming={claimingItemId === selectedItem.id}
+          isOwnItem={itemBelongsToCurrentUser(selectedItem, currentUser, currentClientId)}
           onClaim={() => submitClaim(selectedItem)}
           onMarkReturned={() => markReturned(selectedItem.id)}
           onUndoReturned={() => undoReturned(selectedItem.id)}
@@ -655,12 +669,6 @@ function FoundPage({ items, activeCategory, setActiveCategory, total, onPublish,
       ) : (
         <FeedPanel items={list} kind="found" onOpen={onOpen} />
       )}
-
-      <div className="safety-note">
-        <span className="shield-dot" />
-        <span>温馨提示：请勿发布他人隐私信息，招领成功后请及时下架。</span>
-      </div>
-
     </section>
   );
 }
@@ -704,6 +712,7 @@ function LostPage({ items, activeCategory, setActiveCategory, total, onPublish, 
             <h2 className="list-title">正在寻找 · {total} 条</h2>
             <p className="list-subtitle">同学发布的寻物线索</p>
           </div>
+          <span className="list-reminder">找到失物后请点击已找到</span>
         </div>
       )}
 
@@ -1673,7 +1682,7 @@ function AuthModal({ actionLabel, onClose, onSubmit, onSendCode }) {
   );
 }
 
-function DetailPage({ item, items, comments = [], onBack, claiming = false, onClaim, onComment, onOpenMatch }) {
+function DetailPage({ item, items, comments = [], onBack, claiming = false, isOwnItem = false, onClaim, onComment, onOpenMatch }) {
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const matches = findPotentialMatches(item, items);
@@ -1741,8 +1750,8 @@ function DetailPage({ item, items, comments = [], onBack, claiming = false, onCl
 
       {item.type === 'found' && item.status === 'active' && (
         <div className="detail-action-row">
-          <button className="button-primary detail-claim-button" type="button" onClick={onClaim} disabled={claiming}>
-            {claiming ? '认领中' : '我要认领'}
+          <button className="button-primary detail-claim-button" type="button" onClick={onClaim} disabled={claiming || isOwnItem}>
+            {isOwnItem ? '自己的招领不可认领' : (claiming ? '认领中' : '我要认领')}
           </button>
         </div>
       )}
@@ -1853,10 +1862,13 @@ function FeedPanel({ items, kind, onOpen }) {
               <span className={`type-pill ${kind === 'lost' ? 'lost' : 'found'}`}>{kind === 'lost' ? '寻物中' : '招领中'}</span>
             </span>
             <span className="item-desc">{item.description}</span>
-            <span className="item-meta">
-              <span className={`pin-dot ${kind === 'lost' ? 'lost' : ''}`} />
-              <span>{locationText(item)}</span>
-              <span className="tag light">{item.category}</span>
+            <span className="item-footer">
+              <span className="item-meta">
+                <span className={`pin-dot ${kind === 'lost' ? 'lost' : ''}`} />
+                <span>{locationText(item)}</span>
+                <span className="tag light">{item.category}</span>
+              </span>
+              <span className="item-time">{formatDate(item.createdAt)}</span>
             </span>
           </span>
         </button>
