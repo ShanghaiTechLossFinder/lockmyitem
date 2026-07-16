@@ -702,7 +702,7 @@ function FoundPage({ items, activeCategory, setActiveCategory, total, onPublish,
       {list.length === 0 ? (
         <div className="empty">{semanticQuery.trim() ? '没有匹配的招领信息' : '暂时没有招领信息'}</div>
       ) : (
-        <FeedPanel items={list} kind="found" onOpen={onOpen} />
+        <FeedPanel items={list} allItems={items} kind="found" onOpen={onOpen} />
       )}
     </section>
   );
@@ -752,7 +752,7 @@ function LostPage({ items, activeCategory, setActiveCategory, total, onPublish, 
       {list.length === 0 ? (
         <div className="empty">{semanticQuery.trim() ? '没有匹配的寻物信息' : '暂时没有寻物信息'}</div>
       ) : (
-        <FeedPanel items={list} kind="lost" onOpen={onOpen} />
+        <FeedPanel items={list} allItems={items} kind="lost" onOpen={onOpen} />
       )}
 
     </section>
@@ -953,7 +953,6 @@ function MePage({ items, stats, currentUser, onPublish, onOpen, onMarkReturned, 
 }
 
 function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, onSubmit, onOpenMatch }) {
-  const defaultLocation = locations[0];
   const [form, setForm] = useState(() => ({
     type: initialDraft?.type || initialType,
     title: initialDraft?.title || '',
@@ -962,7 +961,7 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
     tags: [...(initialDraft?.tags || [])],
     visualDescription: initialDraft?.visualDescription || '',
     rawPredictions: [...(initialDraft?.rawPredictions || [])],
-    locationId: initialDraft?.locationId || defaultLocation.id,
+    locationId: initialDraft?.locationId || '',
     locationDetail: initialDraft?.locationDetail || '',
     locationImages: [...(initialDraft?.locationImages || [])],
     image: initialDraft?.image || '',
@@ -996,10 +995,11 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
   }, [form.image, form.title, form.category, form.visualDescription, form.tags]);
 
   const matches = useMemo(() => findPotentialMatches(form, items), [form, items]);
-  const selectedLocation = getLocation(form.locationId);
+  const selectedLocation = form.locationId ? getLocation(form.locationId) : null;
+  const hasSelectedLocation = Boolean(selectedLocation);
   const locationOptions = useMemo(() => {
     const query = locationQuery.trim().toLowerCase();
-    const selected = getLocation(form.locationId);
+    const selected = form.locationId ? getLocation(form.locationId) : null;
     const filtered = query
       ? locations.filter((location) => (
         [location.name, location.area, location.category, location.guide, location.searchableText]
@@ -1019,7 +1019,6 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
   }
 
   function selectLocation(locationId) {
-    const location = getLocation(locationId);
     setForm((current) => ({
       ...current,
       locationId,
@@ -1093,6 +1092,11 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
   async function addLocationImages(fileList) {
     const files = Array.from(fileList || []).filter((file) => file.type?.startsWith('image/'));
     if (!files.length) return;
+    if (!selectedLocation) {
+      setLocationImageStatus('error');
+      setLocationImageMessage('请先选择地点，再添加方位图片');
+      return;
+    }
     setLocationImageStatus('loading');
     setLocationImageMessage('正在根据方位图片生成方位描述');
     try {
@@ -1133,7 +1137,7 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
 
   async function submit(event) {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || !hasSelectedLocation) return;
     setSubmitting(true);
     try {
       await onSubmit(form);
@@ -1223,8 +1227,8 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
           <div className="location-panel ok">
             <div className="location-head">
               <div>
-                <strong className="location-title">{selectedLocation.name}</strong>
-                <span className="location-subtitle">{selectedLocation.area}</span>
+                <strong className="location-title">{selectedLocation?.name || '请选择'}</strong>
+                <span className="location-subtitle">{selectedLocation?.area || '选择发现或丢失的大致校内地点'}</span>
               </div>
             </div>
             <input
@@ -1234,6 +1238,7 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
               onChange={(event) => setLocationQuery(event.target.value)}
             />
             <select className="field select-field" value={form.locationId} onChange={(event) => selectLocation(event.target.value)}>
+              <option value="">请选择</option>
               {locationOptions.map((location) => (
                 <option key={location.id} value={location.id}>{location.name}</option>
               ))}
@@ -1242,11 +1247,11 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
             <div className="location-confirm">
               <div className="location-confirm-row">
                 <span>已选择：</span>
-                <strong>{selectedLocation.name}</strong>
+                <strong>{selectedLocation?.name || '请选择'}</strong>
               </div>
               <div className="location-confirm-row">
                 <span>地点区域：</span>
-                <strong>{selectedLocation.area}</strong>
+                <strong>{selectedLocation?.area || '选择后自动填充'}</strong>
               </div>
             </div>
             <div className="location-detail-wrap">
@@ -1309,7 +1314,7 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
 
         <div className="publish-actions">
           <button className="button-secondary" type="button" onClick={onCancel} disabled={submitting}>取消</button>
-          <button className="button-primary submit" type="submit" disabled={submitting}>{submitting ? '发布中' : '发布'}</button>
+          <button className="button-primary submit" type="submit" disabled={submitting || !hasSelectedLocation}>{submitting ? '发布中' : '发布'}</button>
         </div>
       </form>
     </section>
@@ -1789,6 +1794,11 @@ function DetailPage({ item, items, comments = [], onBack, claiming = false, isOw
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const matches = findPotentialMatches(item, items);
+  const statusLabel = item.status === 'returned'
+    ? '已回家'
+    : item.type === 'lost'
+      ? (matches.length > 0 ? '匹配' : '暂无匹配')
+      : '招领中';
   const location = itemLocation(item) || {
     name: '未选择地点',
     area: '',
@@ -1821,7 +1831,7 @@ function DetailPage({ item, items, comments = [], onBack, claiming = false, isOw
             <h1 className="title">{item.title}</h1>
           </div>
           <span className={`type-pill ${item.status === 'returned' ? 'returned' : item.type}`}>
-            {item.status === 'returned' ? '已回家' : (item.type === 'lost' ? '寻物中' : '招领中')}
+            {statusLabel}
           </span>
         </div>
         <p className="desc">{item.description}</p>
@@ -1947,31 +1957,36 @@ function SemanticSearchBox({ value, onChange, tone = 'found', placeholder }) {
   );
 }
 
-function FeedPanel({ items, kind, onOpen }) {
+function FeedPanel({ items, allItems = items, kind, onOpen }) {
   return (
     <div className={`feed-panel ${kind}`}>
-      {items.map((item) => (
-        <button key={item.id} className="item-row" type="button" onClick={() => onOpen(item.id)}>
-          <span className={`image-box ${kind}`}>
-            {item.image ? <img src={item.image} alt="" /> : <span>{item.category}</span>}
-          </span>
-          <span className="item-main">
-            <span className="item-head">
-              <strong className="item-title">{item.title}</strong>
-              <span className={`type-pill ${kind === 'lost' ? 'lost' : 'found'}`}>{kind === 'lost' ? '寻物中' : '招领中'}</span>
+      {items.map((item) => {
+        const statusLabel = kind === 'lost'
+          ? (findPotentialMatches(item, allItems).length > 0 ? '匹配' : '暂无匹配')
+          : '招领中';
+        return (
+          <button key={item.id} className="item-row" type="button" onClick={() => onOpen(item.id)}>
+            <span className={`image-box ${kind}`}>
+              {item.image ? <img src={item.image} alt="" /> : <span>{item.category}</span>}
             </span>
-            <span className="item-desc">{item.description}</span>
-            <span className="item-footer">
-              <span className="item-meta">
-                <span className={`pin-dot ${kind === 'lost' ? 'lost' : ''}`} />
-                <span>{locationText(item)}</span>
-                <span className="tag light">{item.category}</span>
+            <span className="item-main">
+              <span className="item-head">
+                <strong className="item-title">{item.title}</strong>
+                <span className={`type-pill ${kind === 'lost' ? 'lost' : 'found'}`}>{statusLabel}</span>
               </span>
-              <span className="item-time">{formatDate(item.createdAt)}</span>
+              <span className="item-desc">{item.description}</span>
+              <span className="item-footer">
+                <span className="item-meta">
+                  <span className={`pin-dot ${kind === 'lost' ? 'lost' : ''}`} />
+                  <span>{locationText(item)}</span>
+                  <span className="tag light">{item.category}</span>
+                </span>
+                <span className="item-time">{formatDate(item.createdAt)}</span>
+              </span>
             </span>
-          </span>
-        </button>
-      ))}
+          </button>
+        );
+      })}
     </div>
   );
 }
