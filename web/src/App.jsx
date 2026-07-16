@@ -1713,10 +1713,6 @@ function DetailPage({ item, items, comments = [], onBack, claiming = false, onCl
           </span>
         </div>
         <p className="desc">{item.description}</p>
-        <div className="tag-row">
-          <span className="tag active">{item.category}</span>
-          {(item.tags || []).filter((tag) => tag !== item.category).map((tag) => <span key={tag} className="tag">{tag}</span>)}
-        </div>
         {claimantText(item) && (
           <div className="claimant-note">
             <span>领取人</span>
@@ -1741,7 +1737,6 @@ function DetailPage({ item, items, comments = [], onBack, claiming = false, onCl
             ))}
           </div>
         )}
-        <p className="map-note">地图为辅助定位，具体位置以发布人选择的地点标记为准。</p>
       </div>
 
       {item.type === 'found' && item.status === 'active' && (

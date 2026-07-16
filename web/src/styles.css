@@ -1510,30 +1510,6 @@ p {
   line-height: 1.55;
 }
 
-.tag-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-height: 48px;
-  overflow: hidden;
-}
-
-.tag-row .tag {
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  padding: 0 9px;
-  color: #53645f;
-  background: #E8F0F3;
-  border-radius: 999px;
-  font-size: 13px;
-}
-
-.tag-row .tag.active {
-  color: #ffffff;
-  background: var(--green);
-}
-
 .claimant-note {
   display: grid;
   gap: 4px;
@@ -1597,14 +1573,6 @@ p {
   border: 1px solid #CDE0E5;
   border-radius: 8px;
   line-height: 1.45;
-}
-
-.map-note {
-  display: block;
-  margin: 6px 0 0;
-  color: #667085;
-  font-size: 12px;
-  line-height: 1.4;
 }
 
 .detail-action-row {
