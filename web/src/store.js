@@ -447,6 +447,18 @@ export async function createCloudComment(itemId, content, currentUser) {
   return normalizeComment(data);
 }
 
+export function createLocalComment(itemId, content, currentUser) {
+  return normalizeComment({
+    id: `comment_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    itemId,
+    authorName: currentUser?.nickName || '网页用户',
+    content,
+    status: 'local',
+    localOnly: true,
+    createdAt: new Date().toISOString()
+  });
+}
+
 export async function claimCloudItem(itemId, currentUser) {
   const data = await callLostfound('claimItem', {
     itemId,
