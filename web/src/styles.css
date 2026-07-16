@@ -209,6 +209,11 @@ p {
   line-height: 1.35;
 }
 
+.lost-page .app-subtitle {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .notice-banner {
   position: relative;
   display: flex;

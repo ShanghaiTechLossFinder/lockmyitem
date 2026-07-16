@@ -691,7 +691,7 @@ function LostPage({ items, activeCategory, setActiveCategory, total, onPublish, 
       <div className="board-head">
         <div>
           <h1 className="app-title">寻物登记</h1>
-          <p className="app-subtitle">丢失物品后，先登记线索再等待匹配提醒</p>
+          <p className="app-subtitle">点击物品详情可查看自动匹配结果</p>
         </div>
         <RefreshHint />
         <PwaInstallButton tone="lost" onClick={onInstallDesktop} />
