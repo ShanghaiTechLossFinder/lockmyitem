@@ -534,7 +534,13 @@ function App() {
       )}
 
       {syncing && <div className="sync-chip" role="status">同步中</div>}
-      {showTabBar && <TabBar view={view} onChange={openTab} />}
+      {showTabBar && (
+        <TabBar
+          view={view}
+          onChange={openTab}
+          onPublish={() => openPublish(view === 'lost' ? 'lost' : 'found')}
+        />
+      )}
       {authPrompt && (
         <AuthModal
           actionLabel={authPrompt.actionLabel}
@@ -605,7 +611,6 @@ function FoundPage({ items, activeCategory, setActiveCategory, total, onPublish,
         <span>温馨提示：请勿发布他人隐私信息，招领成功后请及时下架。</span>
       </div>
 
-      <PublishFab tone="found" label="发布招领" onClick={onPublish} />
     </section>
   );
 }
@@ -658,7 +663,6 @@ function LostPage({ items, activeCategory, setActiveCategory, total, onPublish, 
         <FeedPanel items={list} kind="lost" onOpen={onOpen} />
       )}
 
-      <PublishFab tone="lost" label="发布寻物" onClick={onPublish} />
     </section>
   );
 }
@@ -1376,15 +1380,6 @@ function PwaInstallGuide({ onClose }) {
   );
 }
 
-function PublishFab({ tone, label, onClick }) {
-  return (
-    <button className={`publish-fab ${tone}`} type="button" aria-label={label} onClick={onClick}>
-      <span className="publish-fab-plus">+</span>
-      <span className="publish-fab-label">发布</span>
-    </button>
-  );
-}
-
 function RecognitionPanel({ classifying, stage, extractedText, type, error, visualDescription }) {
   const target = type === 'lost' ? '历史招领' : '历史寻物';
   const steps = stage === 'error'
@@ -1821,18 +1816,27 @@ function FeedPanel({ items, kind, onOpen }) {
   );
 }
 
-function TabBar({ view, onChange }) {
+function TabBar({ view, onChange, onPublish }) {
+  const firstItems = tabItems.slice(0, 2);
+  const lastItems = tabItems.slice(2);
+  const renderTab = (item) => {
+    const active = view === item.key;
+    return (
+      <button key={item.key} type="button" className={active ? 'active' : ''} onClick={() => onChange(item.key)}>
+        <img src={active ? item.activeIcon : item.icon} alt="" />
+        <span>{item.text}</span>
+      </button>
+    );
+  };
+
   return (
     <nav className="tab-bar" aria-label="主导航">
-      {tabItems.map((item) => {
-        const active = view === item.key;
-        return (
-          <button key={item.key} type="button" className={active ? 'active' : ''} onClick={() => onChange(item.key)}>
-            <img src={active ? item.activeIcon : item.icon} alt="" />
-            <span>{item.text}</span>
-          </button>
-        );
-      })}
+      {firstItems.map(renderTab)}
+      <button className="tab-publish-button" type="button" aria-label="发布" onClick={onPublish}>
+        <span className="tab-publish-plus">+</span>
+        <span className="tab-publish-label">发布</span>
+      </button>
+      {lastItems.map(renderTab)}
     </nav>
   );
 }
