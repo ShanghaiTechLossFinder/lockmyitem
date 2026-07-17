@@ -1289,6 +1289,81 @@ async function notifyLostOwnersAboutFoundMatch(foundItem = {}, finderUser = {}) 
   return sent;
 }
 
+async function notifyLostOwnerAboutExistingFoundMatches(lostItem = {}, lostOwner = {}) {
+  if (lostItem.type !== 'lost' || lostItem.status !== 'active') return [];
+  const lostOwnerEmail = userEmail(lostOwner);
+  if (!lostOwnerEmail) return [];
+
+  const result = await db.collection(COLLECTIONS.items)
+    .where({ type: 'found', status: 'active' })
+    .orderBy('createdAt', 'desc')
+    .limit(80)
+    .get();
+
+  const matches = (result.data || [])
+    .filter((foundItem) => foundItem.ownerOpenid)
+    .map((foundItem) => {
+      const match = scoreLostFoundMatch(lostItem, foundItem);
+      return { foundItem, ...match };
+    })
+    .filter((entry) => entry.similarity >= MATCH_EMAIL_CONFIG.threshold)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, MATCH_EMAIL_CONFIG.maxRecipients);
+
+  const sent = [];
+  for (const match of matches) {
+    const foundOwner = await getUserByActorId(match.foundItem.ownerOpenid);
+    const finderEmail = userEmail(foundOwner);
+    const finderName = userDisplayName(foundOwner, match.foundItem.ownerName || '招领发布者');
+    const lostTitle = lostItem.title || '你的寻物线索';
+    const foundTitle = match.foundItem.title || '一件招领物品';
+    const location = itemLocationText(match.foundItem);
+    const reasonText = match.reasons.length ? match.reasons.join('、') : '物品特征相似';
+    const subject = `LockMyItem：可能找到你的「${lostTitle}」`;
+    const text = [
+      `你好，${userDisplayName(lostOwner)}：`,
+      '',
+      `已有一条招领信息和你刚发布的寻物「${lostTitle}」相似度较高。`,
+      `招领物品：${foundTitle}`,
+      `匹配相似度：${match.similarity}%`,
+      `匹配理由：${reasonText}`,
+      `招领地点：${location}`,
+      `招领发布者：${finderName}`,
+      `发布者邮箱：${finderEmail || '未提供'}`,
+      '',
+      '请回到 LockMyItem 查看详情并确认是否为你的物品。'
+    ].join('\n');
+    const html = `
+      <p>你好，${escapeHtml(userDisplayName(lostOwner))}：</p>
+      <p>已有一条招领信息和你刚发布的寻物 <strong>「${escapeHtml(lostTitle)}」</strong> 相似度较高。</p>
+      <ul>
+        <li>招领物品：${escapeHtml(foundTitle)}</li>
+        <li>匹配相似度：${escapeHtml(String(match.similarity))}%</li>
+        <li>匹配理由：${escapeHtml(reasonText)}</li>
+        <li>招领地点：${escapeHtml(location)}</li>
+        <li>招领发布者：${escapeHtml(finderName)}</li>
+        <li>发布者邮箱：${escapeHtml(finderEmail || '未提供')}</li>
+      </ul>
+      <p>请回到 LockMyItem 查看详情并确认是否为你的物品。</p>
+    `;
+
+    try {
+      await sendTransactionalEmail({ to: lostOwnerEmail, subject, text, html });
+      await createNotification(
+        lostItem.ownerOpenid,
+        'match',
+        `已有招领「${foundTitle}」可能匹配你的寻物「${lostTitle}」`,
+        match.foundItem._id || match.foundItem.id,
+        match.foundItem.ownerOpenid
+      ).catch(() => null);
+      sent.push({ itemId: match.foundItem._id, to: lostOwnerEmail, similarity: match.similarity });
+    } catch (error) {
+      console.warn('Failed to send reverse match email notification.', error && (error.message || error));
+    }
+  }
+  return sent;
+}
+
 async function login(event, context) {
   const actor = requireActorId(context, event);
   if (actor.error) return actor.error;
@@ -1433,6 +1508,11 @@ async function createItem(event, context) {
     const finderUser = await getUserByActorId(actor.actorId);
     await notifyLostOwnersAboutFoundMatch(hydrated[0], finderUser).catch((error) => {
       console.warn('Failed to send found-match email notifications.', error && (error.message || error));
+    });
+  } else if (data.type === 'lost') {
+    const lostOwner = await getUserByActorId(actor.actorId);
+    await notifyLostOwnerAboutExistingFoundMatches(hydrated[0], lostOwner).catch((error) => {
+      console.warn('Failed to send existing-found match email notifications.', error && (error.message || error));
     });
   }
   return ok(hydrated[0]);
