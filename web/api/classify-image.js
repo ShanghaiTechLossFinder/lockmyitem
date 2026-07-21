@@ -270,7 +270,7 @@ export default async function handler(req, res) {
     || '';
 
   if (!apiKey) {
-    return fail(res, 500, '服务端未配置 HUNYUAN_API_KEY', 'MODEL_NOT_CONFIGURED');
+    return fail(res, 500, '服务端未配置模型服务凭据', 'MODEL_NOT_CONFIGURED');
   }
 
   const body = req.body || {};

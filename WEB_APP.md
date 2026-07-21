@@ -1,4 +1,4 @@
-# 上科大失物招领 Web/PWA 版本
+# ItemLocker / 上科大失物招领 Web/PWA 版本
 
 `web/` 是当前唯一维护主线。它不依赖微信小程序审核，可以直接部署成网页，并支持从手机浏览器安装到桌面。
 
@@ -27,16 +27,14 @@ npm run build
 
 ## 网页端混元图像识别
 
-网页端必须通过服务端调用混元大模型，不能把混元 API Key 写进浏览器代码。当前前端优先调用 CloudBase `lostfound` 云函数：
+网页端必须通过服务端调用混元大模型，不能把模型服务凭据写进浏览器代码。当前前端优先调用 CloudBase `lostfound` 云函数：
 
 ```bash
-VITE_TCB_ENV_ID=cloud1-d9gnyuxf5b44b6b92
 VITE_TCB_FUNCTION_NAME=lostfound
 VITE_TCB_REGION=ap-shanghai
-VITE_TCB_ACCESS_KEY=CloudBase Web Publishable Key
 ```
 
-可以复制 `web/.env.production.example` 为 `web/.env.production`，只在本地或部署平台配置真实 `VITE_TCB_ACCESS_KEY`，不要把真实 key 提交到 GitHub。
+可以复制 `web/.env.production.example` 为 `web/.env.production`。公开仓库只保留非敏感运行配置；凭据类值只能放在 CloudBase 或部署平台的 secret storage。
 
 前端与云函数的调用约定：
 
@@ -49,7 +47,7 @@ VITE_TCB_ACCESS_KEY=CloudBase Web Publishable Key
 }
 ```
 
-云函数会在服务端读取 `HUNYUAN_API_KEY` 或 `TENCENT_SECRET_ID/TENCENT_SECRET_KEY`，再调用腾讯混元视觉模型。上线前需要在 CloudBase 控制台开启 Web 端可调用云函数的权限，并按腾讯 CloudBase Web SDK 要求配置 Publishable Key 或对应权限策略。
+云函数会在服务端读取模型服务凭据，再调用腾讯混元视觉模型。上线前需要在 CloudBase 控制台开启 Web 端可调用云函数的权限，并按腾讯 CloudBase Web SDK 要求配置对应权限策略。
 
 如果不走 CloudBase，也可以部署 `web/api/classify-image.js` 作为独立后端代理，前端会读取：
 
@@ -57,35 +55,20 @@ VITE_TCB_ACCESS_KEY=CloudBase Web Publishable Key
 VITE_MODEL_API_URL=https://你的后端域名/api/classify-image
 ```
 
-`web/api/classify-image.js` 提供了一个 Vercel 风格的服务端接口模板，需要在服务端配置：
-
-```bash
-HUNYUAN_API_KEY=你的混元密钥
-HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
-HUNYUAN_MODEL=hunyuan-vision
-ALLOWED_ORIGIN=https://lockmyitem.asia
-```
+`web/api/classify-image.js` 提供了一个 Vercel 风格的服务端接口模板。服务端凭据、代理访问凭据和来源白名单必须通过部署平台 secret storage 配置，不写入仓库。
 
 部署后，图片上传会调用该接口，再由服务端调用腾讯混元视觉模型返回分类、标签和物品描述。网页不会再使用浏览器本地模型伪装成自动识别。
 
 ### lockmyitem.asia 上线检查
 
-1. CloudBase 环境使用 `cloud1-d9gnyuxf5b44b6b92`。
-2. `lostfound` 云函数部署最新代码，且 `classifyImage` action 可用。
-3. 云函数环境变量至少配置一组：
-   - `HUNYUAN_API_KEY`
-   - `HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1`
-   - `HUNYUAN_MODEL=hunyuan-vision`
-4. 或者配置腾讯云签名调用：
-   - `TENCENT_SECRET_ID`
-   - `TENCENT_SECRET_KEY`
-   - `TENCENT_HUNYUAN_ENDPOINT=https://hunyuan.tencentcloudapi.com`
-   - `HUNYUAN_MODEL=hunyuan-vision`
-5. CloudBase Web 端权限二选一：
+1. `lostfound` 云函数部署最新代码，且 `classifyImage` action 可用。
+2. 云函数已在 CloudBase 控制台配置模型服务凭据。
+3. 邮箱登录或通知启用时，已在 CloudBase 控制台配置邮件服务凭据和 auth 签名 secret。
+4. CloudBase Web 端权限二选一：
    - 开启匿名登录，让前端用匿名身份调用云函数。
-   - 配置 Web Publishable Key，并在构建时设置 `VITE_TCB_ACCESS_KEY`。
-6. 将 `https://lockmyitem.asia` 加入 CloudBase Web 安全来源或允许来源。
-7. 构建并部署网页端：
+   - 配置 Web Publishable 权限并在部署平台 secret storage 中设置对应凭据。
+5. 将 `https://lockmyitem.asia` 加入 CloudBase Web 安全来源或允许来源。
+6. 构建并部署网页端：
 
 ```bash
 cd web

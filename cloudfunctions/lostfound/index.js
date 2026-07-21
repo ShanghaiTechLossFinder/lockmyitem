@@ -76,11 +76,7 @@ const AUTH_CONFIG = {
   smtpUser: process.env.SMTP_USER || '',
   smtpPass: process.env.SMTP_PASS || '',
   smtpFrom: process.env.SMTP_FROM || process.env.SMTP_USER || '',
-  tokenSecret: process.env.AUTH_TOKEN_SECRET
-    || HUNYUAN_CONFIG.apiKey
-    || HUNYUAN_CONFIG.secretKey
-    || process.env.TENCENT_SECRET_KEY
-    || 'lockmyitem-dev-token-secret'
+  tokenSecret: process.env.AUTH_TOKEN_SECRET || process.env.LOCKMYITEM_AUTH_SECRET || ''
 };
 
 const MATCH_EMAIL_CONFIG = {
@@ -708,6 +704,13 @@ function verifyPassword(password = '', user = {}) {
   return safeEqual(hash, user.passwordHash);
 }
 
+function requireAuthTokenSecret() {
+  if (!AUTH_CONFIG.tokenSecret) {
+    throw new Error('认证签名凭据未配置');
+  }
+  return AUTH_CONFIG.tokenSecret;
+}
+
 function createAuthToken(user = {}) {
   const email = normalizeShanghaiTechEmail(user.email || user.contact || '');
   const actorId = user._openid || user.actorId || `email:${emailHash(email)}`;
@@ -718,7 +721,8 @@ function createAuthToken(user = {}) {
     exp: Date.now() + AUTH_CONFIG.tokenTtlMs
   };
   const body = base64UrlEncode(JSON.stringify(payload));
-  const signature = hmac(AUTH_CONFIG.tokenSecret, body, 'base64')
+  const tokenSecret = requireAuthTokenSecret();
+  const signature = hmac(tokenSecret, body, 'base64')
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/g, '');
@@ -726,6 +730,7 @@ function createAuthToken(user = {}) {
 }
 
 function verifyAuthToken(token = '') {
+  if (!AUTH_CONFIG.tokenSecret) return null;
   const value = String(token || '').trim();
   const parts = value.split('.');
   if (parts.length !== 2) return null;
@@ -757,7 +762,8 @@ function createClaimToken(itemId, claimantOpenid) {
     nonce: crypto.randomBytes(8).toString('hex')
   };
   const body = base64UrlEncode(JSON.stringify(payload));
-  const signature = hmac(AUTH_CONFIG.tokenSecret, `claim.${body}`, 'base64')
+  const tokenSecret = requireAuthTokenSecret();
+  const signature = hmac(tokenSecret, `claim.${body}`, 'base64')
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/g, '');
@@ -765,6 +771,7 @@ function createClaimToken(itemId, claimantOpenid) {
 }
 
 function verifyClaimToken(token = '', itemId = '', claimantOpenid = '') {
+  if (!AUTH_CONFIG.tokenSecret) return null;
   const value = String(token || '').trim();
   const parts = value.split('.');
   if (parts.length !== 2) return null;
@@ -1913,7 +1920,7 @@ async function listLocations(event) {
 
 async function classifyImage(event, context) {
   if (!HUNYUAN_CONFIG.apiKey && !(HUNYUAN_CONFIG.secretId && HUNYUAN_CONFIG.secretKey)) {
-    return fail('请先配置 HUNYUAN_API_KEY 或 TENCENT_SECRET_ID/TENCENT_SECRET_KEY', 'MODEL_NOT_CONFIGURED');
+    return fail('请先在云函数环境中配置模型服务凭据', 'MODEL_NOT_CONFIGURED');
   }
   const payloadError = validateClassifyImagePayload(event);
   if (payloadError) return payloadError;

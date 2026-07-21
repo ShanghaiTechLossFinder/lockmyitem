@@ -1,6 +1,14 @@
-# LockMyItem Web/PWA
+# ItemLocker / LockMyItem Web/PWA
 
 面向上海科技大学校园场景的失物招领网页端。当前唯一主线是 `web/` React PWA，后端能力由 `cloudfunctions/lostfound` 这个 CloudBase 云函数提供。
+
+## 仓库标识
+
+- 组织显示名：`ItemLocker`
+- 仓库名：`lockmyitem`
+- 公开访问域名：`lockmyitem.asia`
+
+当前 GitHub 远端仍指向现有仓库。若需要把 GitHub owner 实际改为 `itemlocker`，需要先在 GitHub 完成组织改名或仓库转移；完成后再更新 remote URL。
 
 ## 当前主线
 
@@ -38,16 +46,14 @@ npm run build
 
 ## CloudBase 配置
 
-web 前端默认调用 CloudBase 环境：
+web 前端通过 CloudBase Web SDK 调用 `lostfound` 云函数。公开仓库只保留非敏感运行配置；所有凭据、邮件账号、模型服务凭据和签名密钥都必须只放在 CloudBase 控制台或部署平台环境变量里。
 
 ```env
-VITE_CLOUDBASE_ENV_ID=cloud1-d9gnyuxf5b44b6b92
 VITE_CLOUDBASE_FUNCTION_NAME=lostfound
 VITE_CLOUDBASE_REGION=ap-shanghai
-VITE_CLOUDBASE_ACCESS_KEY=
 ```
 
-可复制 `web/.env.production.example` 为本地或部署平台环境变量模板。真实 Publishable Key、SMTP 密码、混元 API Key 和腾讯云 Secret 必须只放在本地环境或 CloudBase 环境变量中，不要提交到仓库。
+可复制 `web/.env.production.example` 为本地或部署平台环境变量模板。不要把任何真实凭据、口令、token、cookie 或私钥提交到仓库。
 
 `lostfound` 云函数依赖的服务端环境变量见 `CLOUD_DEVELOPMENT_SETUP.md`。图片识别接口约定见 `MODEL_API_CONTRACT.md`。
 
@@ -81,7 +87,7 @@ CloudBase 环境需要以下集合：
 
 ## 隐私和安全边界
 
-- 浏览器端不保存混元 API Key、腾讯云 Secret、SMTP 密码或服务端 token。
+- 浏览器端不保存模型服务凭据、云服务签名凭据、邮件密码或服务端 token。
 - 图片识别通过 CloudBase 云函数或受保护的后端代理调用模型。
 - 招领文本中的完整卡号、证件号、手机号会自动打码；只有银行卡、身份证、护照、驾驶证、医保卡、社保卡等卡面/证件类图片在认领前隐藏，钱包、钥匙和普通电子产品仍可直接用图片辅助确认。
 - 发布地点来自用户手动点选、地点搜索或手动输入，不依赖浏览器定位权限。

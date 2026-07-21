@@ -1,62 +1,32 @@
 # CloudBase Backend Setup
 
-CloudBase environment:
-
-```text
-cloud1-d9gnyuxf5b44b6b92
-```
+Repository identity: `ItemLocker / lockmyitem`.
 
 The web app calls `cloudfunctions/lostfound` through the CloudBase Web SDK. This function handles item data, comments, email auth, claim/return flows, match notifications, and Hunyuan image recognition.
 
 ## Web Environment Variables
 
-Configure these values for the web build or copy `web/.env.production.example` to a local production env file:
+Configure non-sensitive web build values through the deployment platform or copy `web/.env.production.example` to a local production env file:
 
 ```env
-VITE_CLOUDBASE_ENV_ID=cloud1-d9gnyuxf5b44b6b92
 VITE_CLOUDBASE_FUNCTION_NAME=lostfound
 VITE_CLOUDBASE_REGION=ap-shanghai
-VITE_CLOUDBASE_ACCESS_KEY=
 ```
 
-Leave `VITE_CLOUDBASE_ACCESS_KEY` empty only when anonymous login is enabled for this CloudBase environment.
+Credential-like values are intentionally omitted from repository examples. Configure them only in CloudBase or deployment-platform secret storage.
 
 ## Cloud Function Environment Variables
 
-Configure these variables in the CloudBase console for `cloudfunctions/lostfound`.
+Configure required model, auth-signing, and email credentials in the CloudBase console for `cloudfunctions/lostfound`. Do not write credential names with sample values into committed docs, and do not place real values in frontend code.
 
-Tencent Cloud signed Hunyuan mode:
+Required groups:
 
-```env
-TENCENT_SECRET_ID=your-secret-id
-TENCENT_SECRET_KEY=your-secret-key
-HUNYUAN_MODEL=hunyuan-vision
-TENCENT_HUNYUAN_ENDPOINT=https://hunyuan.tencentcloudapi.com
-```
+- model service credentials for Tencent Hunyuan image recognition
+- auth token signing secret for email login and claim flows
+- SMTP credentials when email verification or notification is enabled
+- CloudBase Web access policy or anonymous-login policy for browser calls
 
-Optional OpenAI-compatible Hunyuan mode:
-
-```env
-HUNYUAN_API_KEY=your-sk-api-key
-HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
-HUNYUAN_MODEL=hunyuan-vision
-```
-
-If both Tencent Cloud `SecretId/SecretKey` and `HUNYUAN_API_KEY` exist, the cloud function prefers Tencent Cloud signed API calls.
-
-Optional ShanghaiTech email login:
-
-```env
-AUTH_EMAIL_DOMAIN=shanghaitech.edu.cn
-AUTH_TOKEN_SECRET=use-a-long-random-server-side-secret
-SMTP_HOST=smtp.example.com
-SMTP_PORT=465
-SMTP_USER=your-sender@example.com
-SMTP_PASS=your-smtp-password-or-app-password
-SMTP_FROM=LockMyItem <your-sender@example.com>
-```
-
-`AUTH_TOKEN_SECRET` and all SMTP credentials must stay in CloudBase environment variables. Do not put real values in frontend code or GitHub.
+If multiple Hunyuan credential modes are configured, the cloud function prefers Tencent Cloud signed API calls over the OpenAI-compatible endpoint.
 
 ## Deploy
 
@@ -84,10 +54,12 @@ Cloud function test event:
 ```json
 {
   "action": "classifyImage",
-  "imageUrl": "https://raw.githubusercontent.com/lockmuitem/lockmyitem/main/web/src/assets/items/umbrella.jpg",
+  "imageUrl": "https://example.invalid/direct-test-image.jpg",
   "hint": "雨伞，校园失物招领图片识别测试"
 }
 ```
+
+Replace the image URL with a direct HTTPS image URL that can be downloaded by the cloud function.
 
 Expected shape:
 
@@ -105,4 +77,4 @@ Expected shape:
 }
 ```
 
-Do not commit real API keys, SMTP credentials, tokens, cookies, or CloudBase Publishable Keys.
+Do not commit real credentials, tokens, cookies, private keys, or CloudBase publishable credentials.

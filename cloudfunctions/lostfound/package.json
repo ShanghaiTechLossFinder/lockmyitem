@@ -1,7 +1,7 @@
 {
   "name": "lostfound",
   "version": "1.0.0",
-  "description": "Unified CloudBase backend for the ShanghaiTech lost and found web app",
+  "description": "Unified CloudBase backend for ItemLocker LockMyItem",
   "main": "index.js",
   "dependencies": {
     "lodash.set": "file:vendor/lodash.set",
