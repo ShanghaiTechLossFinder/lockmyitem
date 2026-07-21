@@ -754,11 +754,13 @@ function canSeeClaimantInfo(event = {}) {
 }
 
 function createClaimToken(itemId, claimantOpenid) {
+  const issuedAt = Date.now();
   const payload = {
     typ: 'claim',
     itemId,
     sub: claimantOpenid,
-    exp: Date.now() + CLAIM_CONFIG.tokenTtlMs,
+    iat: issuedAt,
+    exp: issuedAt + CLAIM_CONFIG.tokenTtlMs,
     nonce: crypto.randomBytes(8).toString('hex')
   };
   const body = base64UrlEncode(JSON.stringify(payload));
@@ -791,6 +793,37 @@ function verifyClaimToken(token = '', itemId = '', claimantOpenid = '') {
   }
 }
 
+function claimTokenNotBeforeMs(item = {}) {
+  const value = item.claimTokenNotBefore;
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value.toDate === 'function') {
+    const date = value.toDate();
+    return date instanceof Date ? date.getTime() : 0;
+  }
+  if (value.$date) {
+    const nested = value.$date.$numberLong || value.$date;
+    const number = Number(nested);
+    if (Number.isFinite(number)) return number;
+    const parsed = Date.parse(String(nested));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function claimTokenAllowsItem(tokenPayload, item = {}) {
+  if (!tokenPayload) return false;
+  const notBeforeMs = claimTokenNotBeforeMs(item);
+  if (!notBeforeMs) return true;
+  const issuedAt = Number(tokenPayload.iat || 0);
+  return Number.isFinite(issuedAt) && issuedAt >= notBeforeMs;
+}
+
 function itemBelongsToActor(item = {}, actorId = '') {
   return Boolean(actorId && item.ownerOpenid === actorId);
 }
@@ -808,21 +841,31 @@ function stripProtectedImages(item = {}) {
   };
 }
 
+function stripInternalItemFields(item = {}) {
+  const {
+    claimTokenNotBefore,
+    claimImageResetReason,
+    ...publicItem
+  } = item;
+  return publicItem;
+}
+
 function canViewProtectedImages(item = {}, event = {}, actorId = '') {
   if (!isProtectedFoundItem(item)) return true;
   if (itemBelongsToActor(item, actorId)) return true;
-  return Boolean(verifyClaimToken(event.claimToken, item._id || item.id || event.itemId, actorId));
+  const tokenPayload = verifyClaimToken(event.claimToken, item._id || item.id || event.itemId, actorId);
+  return claimTokenAllowsItem(tokenPayload, item);
 }
 
 function sanitizeItemForViewer(item = {}, event = {}, actorId = '') {
   const safeItem = sanitizeFoundItemPrivacy(sanitizeClaimantInfo(item, canSeeClaimantInfo(event)));
   if (!isProtectedFoundItem(safeItem)) {
-    return { ...safeItem, claimProtected: false, claimImageLocked: false };
+    return stripInternalItemFields({ ...safeItem, claimProtected: false, claimImageLocked: false });
   }
   if (canViewProtectedImages(safeItem, event, actorId)) {
-    return { ...safeItem, claimProtected: true, claimImageLocked: false };
+    return stripInternalItemFields({ ...safeItem, claimProtected: true, claimImageLocked: false });
   }
-  return stripProtectedImages(safeItem);
+  return stripInternalItemFields(stripProtectedImages(safeItem));
 }
 
 function sanitizeClaimantInfo(item = {}, canSeeClaimant = false) {
@@ -1372,7 +1415,7 @@ async function notifyOwnerClaimReviewRequested(item = {}, request = {}) {
     `模型判断：${modelReason}`,
     '',
     '请回到 LockMyItem 的物品详情，在“待确认认领”中选择通过或拒绝。',
-    '确认前不要要求对方提供完整卡号、证件号、手机号等敏感编号。'
+    '如需使用卡号、证件号、手机号等敏感信息核验，请让对方通过 LockMyItem 认领表单提交，系统会脱敏处理。'
   ].join('\n');
   const html = `
     <p>你好，${escapeHtml(userDisplayName(ownerUser))}：</p>
@@ -1385,7 +1428,7 @@ async function notifyOwnerClaimReviewRequested(item = {}, request = {}) {
       <li>模型判断：${escapeHtml(modelReason)}</li>
     </ul>
     <p>请回到 LockMyItem 的物品详情，在“待确认认领”中选择通过或拒绝。</p>
-    <p>确认前不要要求对方提供完整卡号、证件号、手机号等敏感编号。</p>
+    <p>如需使用卡号、证件号、手机号等敏感信息核验，请让对方通过 LockMyItem 认领表单提交，系统会脱敏处理。</p>
   `;
 
   await sendTransactionalEmail({ to: ownerEmail, subject, text, html });
@@ -1422,7 +1465,7 @@ async function notifyLostOwnersAboutFoundMatch(foundItem = {}, finderUser = {}) 
     const foundTitle = safeFoundItem.title || '一件招领物品';
     const location = itemLocationText(safeFoundItem);
     const reasonText = match.reasons.length ? match.reasons.join('、') : '物品特征相似';
-    const claimNotice = isProtectedFoundItem(safeFoundItem) ? '含敏感卡面或证件信息，需先描述非敏感特征，通过后才能查看图片确认。' : '';
+    const claimNotice = isProtectedFoundItem(safeFoundItem) ? '含敏感卡面或证件信息，需先提交可验证特征；敏感内容仅用于核验，不会公开展示。' : '';
     const subject = `LockMyItem：可能找到你的「${lostTitle}」`;
     const text = [
       `你好，${userDisplayName(lostOwner)}：`,
@@ -1501,7 +1544,7 @@ async function notifyLostOwnerAboutExistingFoundMatches(lostItem = {}, lostOwner
     const foundTitle = safeFoundItem.title || '一件招领物品';
     const location = itemLocationText(safeFoundItem);
     const reasonText = match.reasons.length ? match.reasons.join('、') : '物品特征相似';
-    const claimNotice = isProtectedFoundItem(safeFoundItem) ? '含敏感卡面或证件信息，需先描述非敏感特征，通过后才能查看图片确认。' : '';
+    const claimNotice = isProtectedFoundItem(safeFoundItem) ? '含敏感卡面或证件信息，需先提交可验证特征；敏感内容仅用于核验，不会公开展示。' : '';
     const subject = `LockMyItem：可能找到你的「${lostTitle}」`;
     const text = [
       `你好，${userDisplayName(lostOwner)}：`,
@@ -1550,12 +1593,137 @@ async function notifyLostOwnerAboutExistingFoundMatches(lostItem = {}, lostOwner
 }
 
 function normalizeClaimDescription(value = '') {
-  const text = String(value || '')
+  return String(value || '')
     .replace(/[\r\n\t]+/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim()
     .slice(0, CLAIM_CONFIG.maxDescriptionLength);
-  return maskSensitiveText(text, { maskNames: false }).text;
+}
+
+const CLAIM_NON_NAME_TERMS = new Set([
+  '校园卡',
+  '银行卡',
+  '信用卡',
+  '借记卡',
+  '身份证',
+  '手机号',
+  '学生证',
+  '工作证',
+  '上海',
+  '大学',
+  '科技',
+  '蓝色',
+  '紫色',
+  '黑色',
+  '白色',
+  '卡套',
+  '姓名',
+  '学号',
+  '卡号'
+]);
+const CLAIM_SURNAME_CHARS = '赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田胡凌霍虞万支柯昝管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉龚程邢裴陆荣翁荀羊於惠甄曲家封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾甘厉戎祖武符刘景詹龙叶幸司韶郜黎蓟薄印宿白怀蒲台从鄂索咸籍赖卓蔺屠蒙池乔阴胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍桑桂濮牛寿通边扈燕冀郏浦尚农温庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧殳沃利蔚越夔隆师巩厍聂晁勾敖融冷辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公';
+
+function compactDigits(value = '') {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function hasVariedDigits(value = '', minDistinct = 3) {
+  const digits = compactDigits(value);
+  return digits.length > 0 && new Set(Array.from(digits)).size >= minDistinct;
+}
+
+function isPossibleChineseName(value = '') {
+  const text = String(value || '').trim();
+  if (!/^[\u4e00-\u9fa5]{2,4}$/.test(text)) return false;
+  if (CLAIM_NON_NAME_TERMS.has(text)) return false;
+  if (new Set(Array.from(text)).size <= 1) return false;
+  return CLAIM_SURNAME_CHARS.includes(text[0]);
+}
+
+function hasSensitiveClaimSignal(description = '') {
+  const text = String(description || '').trim();
+  const compactText = text.replace(/[\s,，.。;；:：!！?？'"“”‘’()[\]{}<>《》【】、/\\|_-]+/g, '');
+  if (isPossibleChineseName(compactText)) return true;
+  if (/(?:持卡人|姓名|名字|姓名信息)\s*(?:[:：#]|为|是)?\s*[\u4e00-\u9fa5]{2,4}/.test(text)) return true;
+
+  const labeledIdentifier = text.match(/(?:身份证|学生证|工作证|工卡|校园卡|一卡通|饭卡|银行卡|信用卡|借记卡|护照|证件|卡|手机|电话)(?:号|号码|编号)?|工号|学号|证号/g);
+  if (labeledIdentifier && /[A-Za-z0-9-]{4,24}/.test(text) && hasVariedDigits(text, 3)) return true;
+  if (/\b\d{6}(?:18|19|20)?\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b/.test(text) && hasVariedDigits(text, 4)) return true;
+  if (/(^|[^\d])1[3-9]\d{9}(?=$|[^\d])/.test(text) && hasVariedDigits(text, 3)) return true;
+
+  const cardCandidates = text.match(/(?:\d[\s-]?){12,19}/g) || [];
+  return cardCandidates.some((candidate) => hasVariedDigits(candidate, 4));
+}
+
+function cleanupClaimStorageText(value = '') {
+  return String(value || '')
+    .replace(/\s+([，。！？；：、,.!?;:])/g, '$1')
+    .replace(/([，。！？；：、,.!?;:])\s+/g, '$1')
+    .replace(/[、,，;；:：]{2,}/g, '，')
+    .replace(/[、,，;；:：]+([。.!！?？])/g, '$1')
+    .replace(/^[\s,，;；:：、]+|[\s,，;；:：、]+$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function maskStandaloneClaimNames(value = '') {
+  return String(value || '').replace(
+    /(^|[\s,，、;；:：])([\u4e00-\u9fa5]{2,4})(?=$|[\s,，、;；:：.。!！?？])/g,
+    (match, prefix, name) => (isPossibleChineseName(name) ? `${prefix}姓名` : match)
+  );
+}
+
+const LEGACY_CLAIM_MASK_SUFFIX = [0x5df2, 0x9690, 0x85cf].map((code) => String.fromCharCode(code)).join('');
+const LEGACY_CLAIM_MASK_SUFFIX_PATTERN = new RegExp(LEGACY_CLAIM_MASK_SUFFIX, 'g');
+
+function claimMaskReasonSummary(reasons = []) {
+  const labels = unique(reasons.map((reason) => String(reason || '').replace(LEGACY_CLAIM_MASK_SUFFIX_PATTERN, '').trim()));
+  return labels.length ? `${labels.join('、')}已处理` : '已提交可核验信息';
+}
+
+function maskClaimDescriptionForStorage(description = '') {
+  const masked = maskSensitiveText(description, { maskNames: true });
+  const text = cleanupClaimStorageText(maskStandaloneClaimNames(masked.text));
+  if (text) return text.slice(0, CLAIM_CONFIG.maxDescriptionLength);
+  if (masked.changed) return claimMaskReasonSummary(masked.reasons);
+  return '已提交认领信息';
+}
+
+function claimDescriptionFingerprint(description = '') {
+  if (!AUTH_CONFIG.tokenSecret) return '';
+  return hmac(AUTH_CONFIG.tokenSecret, `claim-description.${description}`, 'hex');
+}
+
+function validateClaimDescriptionQuality(description = '') {
+  const text = String(description || '').trim();
+  const hasSensitiveSignal = hasSensitiveClaimSignal(text);
+  if (hasSensitiveSignal) return '';
+
+  if (text.length < CLAIM_CONFIG.minDescriptionLength) {
+    return `请至少输入 ${CLAIM_CONFIG.minDescriptionLength} 个字的物品特征描述`;
+  }
+
+  const meaningfulText = text.replace(/[\s,，.。;；:：!！?？'"“”‘’()[\]{}<>《》【】、/\\|_-]+/g, '');
+  const hasLetterOrChinese = /[A-Za-z\u4e00-\u9fa5]/.test(meaningfulText);
+  const chineseCount = (meaningfulText.match(/[\u4e00-\u9fa5]/g) || []).length;
+  const latinWordCount = (text.match(/[A-Za-z]{2,}/g) || []).length;
+  const distinctChars = new Set(Array.from(meaningfulText)).size;
+  const digitCount = (meaningfulText.match(/\d/g) || []).length;
+  const alphaChineseCount = (meaningfulText.match(/[A-Za-z\u4e00-\u9fa5]/g) || []).length;
+
+  if (!hasLetterOrChinese || alphaChineseCount < 2) {
+    return '请描述颜色、外观、卡套、标志、姓名、卡号或其他可核验特征，不能只输入无意义数字';
+  }
+  if (meaningfulText.length >= 6 && distinctChars <= 2) {
+    return '请补充更具体的物品特征，不能只输入重复字符';
+  }
+  if (digitCount > 0 && alphaChineseCount < 4) {
+    return '请不要只用编号认领，请补充卡面类别、学校、姓名、颜色或卡套等特征';
+  }
+  if (chineseCount === 0 && latinWordCount < 2 && alphaChineseCount < 6) {
+    return '请补充更具体的物品特征';
+  }
+  return '';
 }
 
 function claimVerificationImageUrl(item = {}) {
@@ -1583,15 +1751,15 @@ function buildClaimVisionVerificationPrompt(item = {}, description = '') {
   };
   return [
     '你是校园失物招领系统的认领视觉核验助手。',
-    '任务：根据图片中可见的非敏感特征，判断“认领人描述”是否可能对应这件招领物品。',
-    '优先比较颜色、外观、卡套/保护套、贴纸、挂件、材质、磨损、图案、边角状态、配件、放置环境等非敏感特征。',
-    '如果认领人主动提供姓名或学号等身份线索，你可以只在内部比对其是否与图片一致，用于判断是否 match。',
-    '不要要求用户补充完整卡号、身份证号、手机号、工号、学号、护照号、二维码、条码或任何唯一编号。',
+    '任务：根据图片中可见特征，判断“认领人描述”是否可能对应这件招领物品。',
+    '优先比较颜色、外观、卡套/保护套、贴纸、挂件、材质、磨损、图案、边角状态、配件、放置环境等普通视觉特征。',
+    '如果认领人主动提供姓名、卡号、学号、工号、手机号、证件号等敏感线索，你可以只在内部比对其是否与图片一致，用于判断是否 match。',
+    '不要要求用户补充完整卡号、身份证号、手机号、工号、学号、护照号、二维码、条码或任何唯一编号；但用户已经主动提供时可以用于内部核验。',
     '不要在输出中复述具体姓名、学号、卡号、证件号、手机号、二维码或条码内容。',
     '如果图片显示上海银行标志但上下文或描述指向校园卡，应视为可能的联名/借记校园卡，不要仅因“银行卡/校园卡”称呼不同而拒绝。',
-    '认领人描述不需要完整覆盖图片；只要包含一个或多个图片可见的非敏感特征，且没有明显矛盾，可以返回 match。',
-    '如果认领人主动提供的姓名或学号与图片一致，即使其他描述较短，也可以返回 match。',
-    '如果描述只是“是我的”“我丢的”等没有可见特征，返回 uncertain。',
+    '认领人描述不需要完整覆盖图片；只要包含一个或多个图片可见特征或可比对敏感线索，且没有明显矛盾，可以返回 match。',
+    '如果认领人主动提供的姓名、卡号、学号、工号、手机号或证件号与图片一致，即使其他描述较短，也可以返回 match。',
+    '如果描述只是“是我的”“我丢的”、重复字符、随机短数字或无法对应图片字段的无意义编号，返回 uncertain。',
     '如果描述与图片明显矛盾，例如颜色、卡套、贴纸、外观类型完全不一致，返回 mismatch。',
     '必须只返回 JSON，不要 Markdown，不要解释。',
     'JSON 字段：decision, confidence, reason。',
@@ -1663,10 +1831,11 @@ async function getApprovedClaimRequest(requestId, itemId, claimantOpenid) {
   return { _id: requestId, ...request };
 }
 
-async function markClaimRequestModelVerified(request = {}, description = '', modelDecision = {}) {
+async function markClaimRequestModelVerified(request = {}, description = '', modelDecision = {}, descriptionFingerprint = '') {
   if (!request || request.status !== 'pending_review' || !request._id) return null;
   const data = {
-    description,
+    description: maskClaimDescriptionForStorage(description),
+    descriptionFingerprint,
     status: 'model_verified',
     modelDecision,
     updatedAt: now()
@@ -1675,7 +1844,7 @@ async function markClaimRequestModelVerified(request = {}, description = '', mod
   return { ...request, ...data };
 }
 
-async function upsertPendingClaimRequest({ item, itemId, claimantOpenid, claimantUser, description, modelDecision, attemptCount, existingRequest }) {
+async function upsertPendingClaimRequest({ item, itemId, claimantOpenid, claimantUser, description, descriptionFingerprint = '', modelDecision, attemptCount, existingRequest }) {
   const ready = await ensureClaimRequestCollection();
   if (!ready) throw new Error('认领请求存储未就绪，请先创建 claim_requests 集合');
   const data = {
@@ -1685,7 +1854,8 @@ async function upsertPendingClaimRequest({ item, itemId, claimantOpenid, claiman
     claimantOpenid,
     claimantName: userDisplayName(claimantUser, '网页用户'),
     claimantContact: userEmail(claimantUser),
-    description,
+    description: maskClaimDescriptionForStorage(description),
+    descriptionFingerprint,
     status: 'pending_review',
     modelDecision,
     attemptCount,
@@ -1762,8 +1932,10 @@ async function verifyClaimDescription(event, context) {
   if (actor.error) return actor.error;
   if (!event.itemId) return fail('缺少 itemId');
   const description = normalizeClaimDescription(event.description);
-  if (description.length < CLAIM_CONFIG.minDescriptionLength) {
-    return fail(`请至少输入 ${CLAIM_CONFIG.minDescriptionLength} 个字的物品特征描述`, 'DESCRIPTION_REQUIRED');
+  const descriptionFingerprint = claimDescriptionFingerprint(description);
+  const descriptionQualityError = validateClaimDescriptionQuality(description);
+  if (descriptionQualityError) {
+    return fail(descriptionQualityError, 'DESCRIPTION_REQUIRED');
   }
 
   const itemResult = await db.collection(COLLECTIONS.items).doc(event.itemId).get();
@@ -1790,7 +1962,9 @@ async function verifyClaimDescription(event, context) {
   if (
     existingRequest
     && existingRequest.status === 'pending_review'
-    && existingRequest.description === description
+    && existingRequest.descriptionFingerprint
+    && descriptionFingerprint
+    && safeEqual(existingRequest.descriptionFingerprint, descriptionFingerprint)
     && existingRequest.modelDecision?.method === 'vision'
   ) {
     return ok({
@@ -1810,7 +1984,7 @@ async function verifyClaimDescription(event, context) {
   }
 
   if (modelDecision.decision === 'match' && modelDecision.confidence >= CLAIM_CONFIG.minModelConfidence) {
-    await markClaimRequestModelVerified(existingRequest, description, modelDecision).catch((error) => {
+    await markClaimRequestModelVerified(existingRequest, description, modelDecision, descriptionFingerprint).catch((error) => {
       console.warn('Failed to update claim request after model verification.', error && (error.message || error));
     });
     return ok({
@@ -1828,6 +2002,7 @@ async function verifyClaimDescription(event, context) {
     claimantOpenid: actor.actorId,
     claimantUser,
     description,
+    descriptionFingerprint,
     modelDecision,
     attemptCount,
     existingRequest
@@ -2183,8 +2358,9 @@ async function claimItem(event, context) {
 
   if (isProtectedFoundItem(sanitizeFoundItemPrivacy(item))) {
     const tokenPayload = verifyClaimToken(event.claimToken, event.itemId, actor.actorId);
-    const approvedRequest = tokenPayload ? null : await getApprovedClaimRequest(event.requestId, event.itemId, actor.actorId);
-    if (!tokenPayload && !approvedRequest) {
+    const validToken = claimTokenAllowsItem(tokenPayload, item);
+    const approvedRequest = validToken ? null : await getApprovedClaimRequest(event.requestId, event.itemId, actor.actorId);
+    if (!validToken && !approvedRequest) {
       return fail('敏感卡面物品需先提交特征描述，通过后才能认领', 'CLAIM_VERIFICATION_REQUIRED');
     }
   }

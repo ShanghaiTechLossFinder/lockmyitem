@@ -396,7 +396,8 @@ function App() {
 
   async function publishItem(payload) {
     const privacyMasked = payload.type === 'found'
-      && (payload.sensitivityReasons || []).some((reason) => reason.includes('隐藏'));
+      && payload.sensitivityLevel === 'sensitive'
+      && (payload.sensitivityReasons || []).length > 0;
     const nextPayload = {
       ...payload,
       ownerName: currentUser?.nickName || payload.ownerName,
@@ -419,7 +420,7 @@ function App() {
     setActiveCategory('全部');
     setView(payload.type === 'lost' ? 'lost' : 'found');
     if (cloudSynced) {
-      setToast(payload.type === 'lost' ? '已同步发布寻物' : (privacyMasked ? '已同步发布招领，敏感信息已隐藏' : '已同步发布招领'));
+      setToast(payload.type === 'lost' ? '已同步发布寻物' : (privacyMasked ? '已同步发布招领，已保护隐私信息' : '已同步发布招领'));
     } else {
       setToast(privacyMasked ? '云端发布失败，已脱敏暂存本机' : '云端发布失败，已暂存本机');
     }
@@ -1222,8 +1223,8 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
       }));
       setAiExtractedText(nextExtractedText);
       setAiProcessStage('done');
-      if (form.type === 'found' && (data.sensitivityReasons || []).some((reason) => reason.includes('隐藏'))) {
-        setPrivacyNotice('识别结果中的敏感编号已自动隐藏');
+      if (form.type === 'found' && data.sensitivityLevel === 'sensitive') {
+        setPrivacyNotice('识别结果中的敏感信息已自动处理');
       }
       if (result.warning) setModelError(result.warning);
     } catch (error) {
@@ -1291,7 +1292,7 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
     );
     if (masked) {
       setForm(safeForm);
-      setPrivacyNotice('已自动隐藏卡号、证件号或手机号等敏感信息');
+      setPrivacyNotice('已自动处理卡号、证件号或手机号等敏感信息');
     }
     setSubmitting(true);
     try {
@@ -2017,7 +2018,7 @@ function DetailPage({ item, items, comments = [], claimRequests = [], onBack, cl
         {imageLocked ? (
           <span className="protected-image-placeholder">
             <strong>{item.category || '敏感卡面'}</strong>
-            <span>先描述非敏感特征，通过后查看图片确认</span>
+            <span>先提交可验证特征，通过后查看图片确认</span>
           </span>
         ) : (
           item.image ? <img src={item.image} alt="" /> : <span>{item.category}</span>
@@ -2068,11 +2069,11 @@ function DetailPage({ item, items, comments = [], claimRequests = [], onBack, cl
         <form className="claim-verify-card" onSubmit={submitClaimDescription}>
           <span className="section-kicker">认领前确认</span>
           <strong>请先描述物品特征</strong>
-          <p>不要填写完整卡号、身份证号、手机号等敏感信息。可描述颜色、外观、挂件、材质、遗失地点或使用痕迹。</p>
+          <p>可以填写卡号、姓名、学号等可核验信息；系统仅用于后端匹配并脱敏处理，不会公开展示。也可描述颜色、外观、卡套或使用痕迹。</p>
           <textarea
             className="field textarea"
             value={claimDescription}
-            placeholder="例如：蓝色卡套，背面有圆形贴纸；或证件外壳边角有磨损"
+            placeholder="例如：蓝色卡套；张同学；或卡号尾号/完整卡面编号"
             onChange={(event) => setClaimDescription(event.target.value)}
           />
           {claimVerifyMessage && <div className="privacy-notice">{claimVerifyMessage}</div>}

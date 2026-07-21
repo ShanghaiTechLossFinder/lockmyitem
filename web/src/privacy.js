@@ -26,6 +26,11 @@ const PROTECTED_VISUAL_WORDS = [
   '护照',
   '驾驶证'
 ];
+const SENSITIVE_PLACEHOLDER_LABEL_PATTERN = '(?:身份证号|手机号|证件号|编号|姓名|卡号)';
+const LEGACY_PLACEHOLDER_SUFFIX = [0x5df2, 0x9690, 0x85cf].map((code) => String.fromCharCode(code)).join('');
+const LEGACY_BRACKETED_PLACEHOLDER_PATTERN = new RegExp(`\\s*[\\[【(（]\\s*${SENSITIVE_PLACEHOLDER_LABEL_PATTERN}${LEGACY_PLACEHOLDER_SUFFIX}\\s*[\\]】)）]`, 'g');
+const LEGACY_BARE_PLACEHOLDER_PATTERN = new RegExp(`\\s*${SENSITIVE_PLACEHOLDER_LABEL_PATTERN}${LEGACY_PLACEHOLDER_SUFFIX}`, 'g');
+const SENSITIVE_REASON_PATTERN = new RegExp('\\u9690\\u85cf|敏感|身份证号|手机号|编号|姓名|卡号');
 
 function unique(values = []) {
   return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
@@ -58,6 +63,17 @@ function replaceSensitivePattern(text, pattern, replacement, reason, reasons) {
   return nextText;
 }
 
+function cleanupMaskedText(value = '') {
+  return String(value || '')
+    .replace(/\s+([，。！？；：、,.!?;:])/g, '$1')
+    .replace(/([，。！？；：、,.!?;:])\s+/g, '$1')
+    .replace(/[、,，;；:：]{2,}/g, '，')
+    .replace(/[、,，;；:：]+([。.!！?？])/g, '$1')
+    .replace(/^[\s,，;；:：、]+|[\s,，;；:：、]+$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export function maskSensitiveText(value = '', options = {}) {
   const reasons = [];
   let text = String(value || '');
@@ -65,41 +81,56 @@ export function maskSensitiveText(value = '', options = {}) {
 
   text = replaceSensitivePattern(
     text,
+    LEGACY_BRACKETED_PLACEHOLDER_PATTERN,
+    '',
+    '敏感信息',
+    reasons
+  );
+  text = replaceSensitivePattern(
+    text,
+    LEGACY_BARE_PLACEHOLDER_PATTERN,
+    '',
+    '敏感信息',
+    reasons
+  );
+  text = replaceSensitivePattern(
+    text,
     /\b\d{6}(?:18|19|20)?\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b/g,
-    '[身份证号已隐藏]',
-    '身份证号已隐藏',
+    '',
+    '身份证号',
     reasons
   );
   text = replaceSensitivePattern(
     text,
     /(^|[^\d])1[3-9]\d{9}(?=$|[^\d])/g,
-    (match, prefix) => `${prefix}[手机号已隐藏]`,
-    '手机号已隐藏',
+    (match, prefix) => prefix,
+    '手机号',
     reasons
   );
   text = replaceSensitivePattern(
     text,
     /((?:身份证|学生证|工作证|工卡|校园卡|一卡通|饭卡|银行卡|信用卡|借记卡|护照|证件|卡)(?:号|号码|编号)?|工号|学号|证号)\s*(?:[:：#]|为|是)?\s*[A-Za-z0-9-]{6,24}/g,
-    (match, label) => `${label} [编号已隐藏]`,
-    '编号已隐藏',
+    (match, label) => label,
+    '编号',
     reasons
   );
   if (maskNames) {
     text = replaceSensitivePattern(
       text,
       /((?:持卡人|姓名|名字|姓名信息))\s*(?:[:：#]|为|是)?\s*[\u4e00-\u9fa5]{2,4}/g,
-      (match, label) => `${label} [姓名已隐藏]`,
-      '姓名已隐藏',
+      (match, label) => label,
+      '姓名',
       reasons
     );
   }
   text = replaceSensitivePattern(
     text,
     /(?:\d[\s-]?){12,19}/g,
-    '[卡号已隐藏]',
-    '卡号已隐藏',
+    '',
+    '卡号',
     reasons
   );
+  text = cleanupMaskedText(text);
 
   return {
     text,
@@ -143,7 +174,7 @@ export function sanitizeFoundItemPrivacy(item = {}) {
   const title = maskSensitiveText(item.title);
   const description = maskSensitiveText(item.description);
   const visualDescription = maskSensitiveText(item.visualDescription);
-  const persistedMaskReasons = (item.sensitivityReasons || []).filter((reason) => String(reason || '').includes('隐藏'));
+  const persistedMaskReasons = (item.sensitivityReasons || []).filter((reason) => SENSITIVE_REASON_PATTERN.test(String(reason || '')));
   const maskReasons = unique([...title.reasons, ...description.reasons, ...visualDescription.reasons, ...persistedMaskReasons]);
   const sensitivity = sensitivityForItem(item, maskReasons);
 
@@ -166,14 +197,14 @@ export function privacyPromptLines(itemType = '') {
   return [
     '这是招领帖，请保护失主隐私。',
     '不要输出完整卡号、身份证号、手机号、工号、学号、护照号或其他证件唯一编号。',
-    '如果图片或用户描述中出现这些编号，只写“编号已隐藏”或描述为证件/卡片类别。',
-    '不要抄录二维码、条码、证件上的完整姓名或唯一识别信息。'
+    '如果图片或用户描述中出现这些编号，只描述为证件、卡片类别或身份信息。',
+    '不要抄录二维码、条码、证件上的完整姓名或唯一识别信息，也不要输出括号形式的脱敏说明。'
   ];
 }
 
 export function sensitivityBadgeText(item = {}) {
   if (!isFoundItem(item)) return '';
-  if (item.sensitivityLevel === 'sensitive') return '敏感信息已隐藏';
+  if (item.sensitivityLevel === 'sensitive') return '隐私保护';
   if (item.sensitivityLevel === 'important') return '重要物品';
   return '';
 }
