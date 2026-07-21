@@ -112,7 +112,7 @@ async function ensureCloudbaseAuth(app) {
   const auth = typeof app.auth === 'function' ? app.auth({ persistence: 'local' }) : app.auth;
   if (!auth) return;
 
-  const state = await (auth.hasLoginState?.() || auth.getLoginState?.()).catch(() => null);
+  const state = await readCloudbaseLoginState(auth);
   if (state) return;
 
   if (typeof auth.signInAnonymously === 'function') {
@@ -124,6 +124,19 @@ async function ensureCloudbaseAuth(app) {
     ? auth.anonymousAuthProvider()
     : auth.anonymousAuthProvider;
   if (provider?.signIn) await provider.signIn();
+}
+
+async function readCloudbaseLoginState(auth) {
+  const getters = [auth.hasLoginState, auth.getLoginState].filter((getter) => typeof getter === 'function');
+  for (const getter of getters) {
+    try {
+      const state = await Promise.resolve(getter.call(auth));
+      if (state) return state;
+    } catch {
+      // Continue to the next SDK-compatible login-state API.
+    }
+  }
+  return null;
 }
 
 async function getCloudbaseApp() {
