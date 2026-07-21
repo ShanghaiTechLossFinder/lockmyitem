@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ChevronLeft } from 'lucide-react';
 import { campusMapImage, campusMapImageBoundaries, campusMapMeta, categories, locationAliases, locations } from './data.js';
 import {
   claimCloudItem,
@@ -1155,6 +1156,10 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
   return (
     <section className="page publish-page">
       <div className="publish-hero">
+        <button className="publish-back-button" type="button" onClick={onCancel} disabled={submitting} aria-label="返回上一页">
+          <ChevronLeft size={17} strokeWidth={2.4} aria-hidden="true" />
+          <span>返回</span>
+        </button>
         <div className="hero-copy">
           <span className="surface-eyebrow">{form.type === 'lost' ? '寻物登记' : '招领登记'}</span>
           <h1 className="surface-title">{form.type === 'lost' ? '先把线索留下' : '捡到物品，先贴到公告栏'}</h1>

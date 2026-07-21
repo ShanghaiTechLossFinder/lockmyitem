@@ -2212,9 +2212,9 @@ p {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 113px;
+  min-height: 132px;
   margin: 2px 2px 11px;
-  padding: 17px 15px;
+  padding: 42px 15px 17px;
   overflow: hidden;
   color: var(--ink);
   background: #FFFDF7;
@@ -2243,6 +2243,31 @@ p {
   background: rgba(31, 107, 93, 0.08);
   border: 1px solid rgba(31, 107, 93, 0.12);
   border-radius: 50%;
+}
+
+.publish-back-button {
+  position: absolute;
+  top: 11px;
+  left: 13px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  height: 28px;
+  padding: 0 10px 0 7px;
+  color: var(--notice-green);
+  background: #F1F8F5;
+  border: 1px solid rgba(31, 107, 93, 0.18);
+  border-radius: 999px;
+  box-shadow: 0 3px 8px rgba(80, 67, 42, 0.08);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 28px;
+}
+
+.publish-back-button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .hero-copy {
@@ -2745,18 +2770,18 @@ p {
   margin-top: 0;
   margin-bottom: 0;
   padding-top: 9px;
-  padding-bottom: 34px;
+  padding-bottom: 9px;
   line-height: 1.45;
 }
 
 .location-detail-placeholder {
   position: absolute;
   right: 14px;
-  bottom: 10px;
+  top: 12px;
   left: 14px;
   color: #98A2B3;
   font-size: 12.5px;
-  line-height: 1.45;
+  line-height: 1.35;
   pointer-events: none;
 }
 
