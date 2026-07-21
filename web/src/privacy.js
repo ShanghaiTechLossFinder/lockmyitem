@@ -117,7 +117,7 @@ export function maskSensitiveText(value = '', options = {}) {
   if (maskNames) {
     text = replaceSensitivePattern(
       text,
-      /((?:持卡人|姓名|名字|姓名信息))\s*(?:[:：#]|为|是)?\s*[\u4e00-\u9fa5]{2,4}/g,
+      /((?:持卡人|姓名|名字|姓名信息))\s*(?:[:：#]|为|是)?\s*(?!线索|字段|匹配|未见|一致|不一致|已处理)[\u4e00-\u9fa5]{2,4}/g,
       (match, label) => label,
       '姓名',
       reasons

@@ -1623,6 +1623,9 @@ const CLAIM_NON_NAME_TERMS = new Set([
 ]);
 const CLAIM_SURNAME_CHARS = '赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田胡凌霍虞万支柯昝管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉龚程邢裴陆荣翁荀羊於惠甄曲家封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾甘厉戎祖武符刘景詹龙叶幸司韶郜黎蓟薄印宿白怀蒲台从鄂索咸籍赖卓蔺屠蒙池乔阴胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍桑桂濮牛寿通边扈燕冀郏浦尚农温庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧殳沃利蔚越夔隆师巩厍聂晁勾敖融冷辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公';
 const CLAIM_NON_NAME_FRAGMENT_PATTERN = /卡|套|色|证|件|银行|校园|大学|学院|科技|手机|电话|号码|编号|有效期/;
+const CLAIM_MATCH_CONFIDENCE_FLOOR = 0.7;
+const CLAIM_VISUAL_KEYWORD_PATTERN = /蓝色|红色|黑色|白色|绿色|黄色|紫色|粉色|灰色|银色|金色|橙色|棕色|透明|深色|浅色|卡套|保护套|外壳|壳|套|贴纸|标志|logo|图案|挂件|钥匙扣|材质|皮质|塑料|金属|磨损|划痕|裂纹|污渍|边角|缺口|折痕|姓名|学号|工号|卡号|有效期|学校|校园|学院|大学|银行|上海银行|银联|照片|头像|二维码|条码|编号/;
+const CLAIM_GENERIC_ONLY_PATTERN = /^(?:我|我的|本人|自己|这个|这张|这件|那个|那张|一张|一个|是|的|卡|物品|东西|失物|丢的|遗失|认领|领取|找回|哈|哈哈)+$/;
 
 function compactDigits(value = '') {
   return String(value || '').replace(/\D/g, '');
@@ -1642,19 +1645,85 @@ function isPossibleChineseName(value = '') {
   return CLAIM_SURNAME_CHARS.includes(text[0]);
 }
 
-function hasSensitiveClaimSignal(description = '') {
+function splitClaimPhrases(description = '') {
+  return String(description || '')
+    .split(/[\n\r,，。;；、|/\\]+|\s{2,}/)
+    .map((phrase) => phrase.trim())
+    .filter(Boolean);
+}
+
+function isLowInformationClaimPhrase(phrase = '') {
+  const compact = String(phrase || '').replace(/[\s,，.。;；:：!！?？'"“”‘’()[\]{}<>《》【】、/\\|_-]+/g, '');
+  if (!compact) return true;
+  if (compact.length >= 4 && new Set(Array.from(compact)).size <= 2) return true;
+  return CLAIM_GENERIC_ONLY_PATTERN.test(compact);
+}
+
+function claimLabelForType(type = '') {
+  const labels = {
+    name: '姓名线索',
+    phone: '手机号线索',
+    idNumber: '证件号线索',
+    cardNumber: '卡号线索',
+    studentId: '学号线索',
+    workId: '工号线索',
+    labeledSensitiveClaim: '编号线索',
+    visualFeature: '视觉特征'
+  };
+  return labels[type] || '可验证线索';
+}
+
+function extractVerifiableClaims(description = '') {
   const text = String(description || '').trim();
-  const compactText = text.replace(/[\s,，.。;；:：!！?？'"“”‘’()[\]{}<>《》【】、/\\|_-]+/g, '');
-  if (isPossibleChineseName(compactText)) return true;
-  if (/(?:持卡人|姓名|名字|姓名信息)\s*(?:[:：#]|为|是)?\s*[\u4e00-\u9fa5]{2,4}/.test(text)) return true;
+  const claims = [];
+  const seen = new Set();
+  const addClaim = (type, value, options = {}) => {
+    const cleanValue = String(value || '').replace(/\s{2,}/g, ' ').trim();
+    if (!cleanValue) return;
+    const keyValue = options.numeric ? compactDigits(cleanValue) : cleanValue;
+    const key = `${type}:${keyValue || cleanValue}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    claims.push({
+      index: claims.length + 1,
+      type,
+      label: claimLabelForType(type),
+      text: cleanValue,
+      sensitive: Boolean(options.sensitive)
+    });
+  };
 
-  const labeledIdentifier = text.match(/(?:身份证|学生证|工作证|工卡|校园卡|一卡通|饭卡|银行卡|信用卡|借记卡|护照|证件|卡|手机|电话)(?:号|号码|编号)?|工号|学号|证号/g);
-  if (labeledIdentifier && /[A-Za-z0-9-]{4,24}/.test(text) && hasVariedDigits(text, 3)) return true;
-  if (/\b\d{6}(?:18|19|20)?\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b/.test(text) && hasVariedDigits(text, 4)) return true;
-  if (/(^|[^\d])1[3-9]\d{9}(?=$|[^\d])/.test(text) && hasVariedDigits(text, 3)) return true;
+  for (const match of text.matchAll(/(?:持卡人|姓名|名字|姓名信息)\s*(?:[:：#]|为|是)?\s*([\u4e00-\u9fa5]{2,4})/g)) {
+    if (isPossibleChineseName(match[1])) addClaim('name', match[0], { sensitive: true });
+  }
+  for (const phrase of splitClaimPhrases(text)) {
+    if (isPossibleChineseName(phrase)) addClaim('name', phrase, { sensitive: true });
+  }
+  for (const match of text.matchAll(/(?:^|[^\d])(1[3-9]\d{9})(?=$|[^\d])/g)) {
+    if (hasVariedDigits(match[1], 3)) addClaim('phone', match[1], { sensitive: true, numeric: true });
+  }
+  for (const match of text.matchAll(/\b\d{6}(?:18|19|20)?\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b/g)) {
+    if (hasVariedDigits(match[0], 4)) addClaim('idNumber', match[0], { sensitive: true, numeric: true });
+  }
+  for (const match of text.matchAll(/((?:学号|学生证)(?:号|号码|编号)?|工号|工作证(?:号|号码|编号)?|校园卡(?:号|号码|编号)?|一卡通(?:号|号码|编号)?|饭卡(?:号|号码|编号)?|银行卡(?:号|号码|编号)?|信用卡(?:号|号码|编号)?|借记卡(?:号|号码|编号)?|卡号|证号|证件(?:号|号码|编号)?)\s*(?:[:：#]|为|是)?\s*([A-Za-z0-9-]{4,24})/g)) {
+    const label = match[1] || '';
+    const value = match[2] || '';
+    if (!hasVariedDigits(value, 3)) continue;
+    if (/学号|学生证/.test(label)) addClaim('studentId', match[0], { sensitive: true, numeric: true });
+    else if (/工号|工作证/.test(label)) addClaim('workId', match[0], { sensitive: true, numeric: true });
+    else if (/银行卡|信用卡|借记卡|卡号/.test(label)) addClaim('cardNumber', match[0], { sensitive: true, numeric: true });
+    else addClaim('labeledSensitiveClaim', match[0], { sensitive: true, numeric: true });
+  }
+  for (const match of text.matchAll(/(?:\d[\s-]?){12,19}/g)) {
+    if (hasVariedDigits(match[0], 4)) addClaim('cardNumber', match[0], { sensitive: true, numeric: true });
+  }
+  for (const phrase of splitClaimPhrases(text)) {
+    if (phrase.length < 2 || isLowInformationClaimPhrase(phrase)) continue;
+    if (/(?:持卡人|姓名|名字|姓名信息|卡号|学号|工号|手机号|手机|电话|证号|证件号|\d{4,})/.test(phrase)) continue;
+    if (CLAIM_VISUAL_KEYWORD_PATTERN.test(phrase)) addClaim('visualFeature', phrase);
+  }
 
-  const cardCandidates = text.match(/(?:\d[\s-]?){12,19}/g) || [];
-  return cardCandidates.some((candidate) => hasVariedDigits(candidate, 4));
+  return claims;
 }
 
 function cleanupClaimStorageText(value = '') {
@@ -1696,16 +1765,18 @@ function claimDescriptionFingerprint(description = '') {
   return hmac(AUTH_CONFIG.tokenSecret, `claim-description.${description}`, 'hex');
 }
 
-function validateClaimDescriptionQuality(description = '') {
+function validateClaimDescriptionQuality(description = '', verifiableClaims = extractVerifiableClaims(description)) {
   const text = String(description || '').trim();
-  const hasSensitiveSignal = hasSensitiveClaimSignal(text);
-  if (hasSensitiveSignal) return '';
+  if (verifiableClaims.length) return '';
 
+  const meaningfulText = text.replace(/[\s,，.。;；:：!！?？'"“”‘’()[\]{}<>《》【】、/\\|_-]+/g, '');
+  if (/^(?:这?是)?(?:我|本人|自己)?的?(?:卡|物品|东西|失物)$/.test(meaningfulText) || /我的卡|是我的|我丢的|本人/.test(text)) {
+    return '请至少提供一个图中可验证的信息，不要只写“我的卡”或“是我的”';
+  }
   if (text.length < CLAIM_CONFIG.minDescriptionLength) {
     return `请至少输入 ${CLAIM_CONFIG.minDescriptionLength} 个字的物品特征描述`;
   }
 
-  const meaningfulText = text.replace(/[\s,，.。;；:：!！?？'"“”‘’()[\]{}<>《》【】、/\\|_-]+/g, '');
   const hasLetterOrChinese = /[A-Za-z\u4e00-\u9fa5]/.test(meaningfulText);
   const chineseCount = (meaningfulText.match(/[\u4e00-\u9fa5]/g) || []).length;
   const latinWordCount = (text.match(/[A-Za-z]{2,}/g) || []).length;
@@ -1720,12 +1791,12 @@ function validateClaimDescriptionQuality(description = '') {
     return '请补充更具体的物品特征，不能只输入重复字符';
   }
   if (digitCount > 0 && alphaChineseCount < 4) {
-    return '请不要只用编号认领，请补充卡面类别、学校标识、颜色、卡套或使用痕迹等非敏感特征';
+    return '请不要只用无意义编号认领，请补充卡面类别、学校标识、颜色、卡套或使用痕迹等可验证特征';
   }
   if (chineseCount === 0 && latinWordCount < 2 && alphaChineseCount < 6) {
     return '请补充更具体的物品特征';
   }
-  return '';
+  return '请至少提供一个图中可验证的信息，例如姓名、卡号、学号、颜色、卡套、标志或使用痕迹';
 }
 
 function claimVerificationImageUrl(item = {}) {
@@ -1738,7 +1809,7 @@ function claimVerificationImageUrl(item = {}) {
     .find((value) => isHttpUrl(value) && !isDataImageUrl(value) && !isCloudFileId(value)) || '';
 }
 
-function buildClaimVisionVerificationPrompt(item = {}, description = '') {
+function buildClaimVisionVerificationPrompt(item = {}, description = '', verifiableClaims = []) {
   const safeItem = sanitizeFoundItemPrivacy(item);
   const context = {
     title: safeItem.title || '',
@@ -1751,39 +1822,75 @@ function buildClaimVisionVerificationPrompt(item = {}, description = '') {
     ]).slice(0, 12),
     location: itemLocationText(safeItem)
   };
+  const claims = verifiableClaims.map((claim) => ({
+    index: claim.index,
+    type: claim.type,
+    label: claim.label,
+    text: claim.text,
+    sensitive: claim.sensitive
+  }));
   return [
     '你是校园失物招领系统的认领视觉核验助手。',
-    '任务：根据图片中可见特征，判断“认领人描述”是否可能对应这件招领物品。',
+    '任务：逐条判断“可验证声明”是否出现在图片中或能由图片明确支持。',
+    '必须只依据图片可见内容和可比对字段判断；不能因为描述与图片“不矛盾”就返回 match。',
     '优先比较颜色、外观、卡套/保护套、贴纸、挂件、材质、磨损、图案、边角状态、配件、放置环境等普通视觉特征。',
-    '如果认领人主动提供姓名、卡号、学号、工号、手机号、证件号等敏感线索，你可以只在内部比对其是否与图片一致，用于判断是否 match。',
+    '如果认领人主动提供姓名、卡号、学号、工号、手机号、证件号等敏感线索，你可以只在内部比对其是否与图片一致，用于判断对应声明是否匹配。',
     '不要要求用户补充完整卡号、身份证号、手机号、工号、学号、护照号、二维码、条码或任何唯一编号；但用户已经主动提供时可以用于内部核验。',
     '不要在输出中复述具体姓名、学号、卡号、证件号、手机号、二维码或条码内容。',
     '如果图片显示上海银行标志但上下文或描述指向校园卡，应视为可能的联名/借记校园卡，不要仅因“银行卡/校园卡”称呼不同而拒绝。',
-    '认领人描述不需要完整覆盖图片；只要包含一个或多个图片可见特征或可比对敏感线索，且没有明显矛盾，可以返回 match。',
-    '如果认领人主动提供的姓名、卡号、学号、工号、手机号或证件号与图片一致，即使其他描述较短，也可以返回 match。',
-    '如果描述只是“是我的”“我丢的”、重复字符、随机短数字或无法对应图片字段的无意义编号，返回 uncertain。',
-    '如果描述与图片明显矛盾，例如颜色、卡套、贴纸、外观类型完全不一致，返回 mismatch。',
+    '只有至少一个可验证声明被图片明确支持时，decision 才能是 match，并把对应序号放入 matchedClaimIndexes。',
+    '如果没有任何声明被图片支持，即使没有明显矛盾，也必须返回 uncertain。',
+    '如果任一关键声明与图片明显矛盾，例如颜色、卡套、贴纸、外观类型、姓名或编号不一致，返回 mismatch，并把对应序号放入 contradictedClaimIndexes。',
     '必须只返回 JSON，不要 Markdown，不要解释。',
-    'JSON 字段：decision, confidence, reason。',
+    'JSON 字段：decision, confidence, matchedClaimIndexes, contradictedClaimIndexes, reason。',
     'decision 只能是 match、uncertain、mismatch。',
     'confidence 是 0 到 1 的数字。',
+    'matchedClaimIndexes 和 contradictedClaimIndexes 必须是数字数组，数字来自可验证声明列表的 index。',
+    'reason 只能用类别化描述，例如“姓名线索匹配”“编号线索未见”“颜色特征矛盾”，不得复述敏感原文。',
     `招领物品脱敏上下文：${JSON.stringify(context)}`,
-    `认领人描述：${description}`
+    `认领人描述：${description}`,
+    `可验证声明列表：${JSON.stringify(claims)}`
   ].join('\n');
 }
 
-function normalizeClaimModelDecision(raw = {}, fallbackReason = '') {
-  const decision = ['match', 'uncertain', 'mismatch'].includes(raw.decision) ? raw.decision : 'uncertain';
-  const confidence = Math.max(0, Math.min(1, Number(raw.confidence) || 0));
-  const maskedReason = maskSensitiveText(raw.reason || fallbackReason || '需要发布者人工确认').text;
+function normalizeClaimIndexArray(value, claimCount = 0) {
+  const list = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[,，\s]+/);
+  return Array.from(new Set(list
+    .map((item) => Number.parseInt(item, 10))
+    .filter((item) => Number.isInteger(item) && item >= 1 && item <= claimCount)));
+}
+
+function normalizeClaimModelDecision(raw = {}, fallbackReason = '', claimCount = 0) {
+  let decision = ['match', 'uncertain', 'mismatch'].includes(raw.decision) ? raw.decision : 'uncertain';
+  let confidence = Math.max(0, Math.min(1, Number(raw.confidence) || 0));
+  const matchedClaimIndexes = normalizeClaimIndexArray(raw.matchedClaimIndexes, claimCount);
+  const contradictedClaimIndexes = normalizeClaimIndexArray(raw.contradictedClaimIndexes, claimCount);
+  let fallback = fallbackReason || '需要发布者人工确认';
+  let reason = raw.reason || fallback;
+
+  if (contradictedClaimIndexes.length) {
+    decision = 'mismatch';
+    fallback = '有关键可验证信息与图片不一致，转人工确认';
+  } else if (decision === 'match' && matchedClaimIndexes.length === 0) {
+    decision = 'uncertain';
+    confidence = Math.min(confidence, CLAIM_MATCH_CONFIDENCE_FLOOR - 0.01);
+    fallback = '模型未指出图中匹配的具体声明，转人工确认';
+    reason = fallback;
+  }
+
+  const maskedReason = maskSensitiveText(reason).text;
   return {
     decision,
     confidence,
-    reason: cleanClaimField(maskedReason, '需要发布者人工确认', 160)
+    matchedClaimIndexes,
+    contradictedClaimIndexes,
+    reason: cleanClaimField(maskedReason, fallback, 160)
   };
 }
 
-async function verifyClaimDescriptionWithModel(item = {}, description = '') {
+async function verifyClaimDescriptionWithModel(item = {}, description = '', verifiableClaims = []) {
   if (!HUNYUAN_CONFIG.apiKey && !(HUNYUAN_CONFIG.secretId && HUNYUAN_CONFIG.secretKey)) {
     throw new Error('模型未配置');
   }
@@ -1793,15 +1900,15 @@ async function verifyClaimDescriptionWithModel(item = {}, description = '') {
       decision: 'uncertain',
       confidence: 0,
       reason: '缺少可用于视觉核验的图片，转人工确认'
-    });
+    }, '', verifiableClaims.length);
   }
   const raw = await callHunyuanVisionJson({
     imageUrl,
-    prompt: buildClaimVisionVerificationPrompt(item, description),
+    prompt: buildClaimVisionVerificationPrompt(item, description, verifiableClaims),
     temperature: 0.1
   });
   return {
-    ...normalizeClaimModelDecision(raw),
+    ...normalizeClaimModelDecision(raw, '', verifiableClaims.length),
     method: 'vision'
   };
 }
@@ -1935,7 +2042,8 @@ async function verifyClaimDescription(event, context) {
   if (!event.itemId) return fail('缺少 itemId');
   const description = normalizeClaimDescription(event.description);
   const descriptionFingerprint = claimDescriptionFingerprint(description);
-  const descriptionQualityError = validateClaimDescriptionQuality(description);
+  const verifiableClaims = extractVerifiableClaims(description);
+  const descriptionQualityError = validateClaimDescriptionQuality(description, verifiableClaims);
   if (descriptionQualityError) {
     return fail(descriptionQualityError, 'DESCRIPTION_REQUIRED');
   }
@@ -1980,12 +2088,16 @@ async function verifyClaimDescription(event, context) {
   const attemptCount = (existingRequest?.attemptCount || 0) + 1;
   let modelDecision;
   try {
-    modelDecision = await verifyClaimDescriptionWithModel(safeItem, description);
+    modelDecision = await verifyClaimDescriptionWithModel(safeItem, description, verifiableClaims);
   } catch (error) {
-    modelDecision = normalizeClaimModelDecision({}, error.message || '模型不可用，转人工确认');
+    modelDecision = normalizeClaimModelDecision({}, error.message || '模型不可用，转人工确认', verifiableClaims.length);
   }
 
-  if (modelDecision.decision === 'match' && modelDecision.confidence >= CLAIM_CONFIG.minModelConfidence) {
+  if (
+    modelDecision.decision === 'match'
+    && modelDecision.confidence >= Math.max(CLAIM_CONFIG.minModelConfidence, CLAIM_MATCH_CONFIDENCE_FLOOR)
+    && (modelDecision.matchedClaimIndexes || []).length > 0
+  ) {
     await markClaimRequestModelVerified(existingRequest, description, modelDecision, descriptionFingerprint).catch((error) => {
       console.warn('Failed to update claim request after model verification.', error && (error.message || error));
     });

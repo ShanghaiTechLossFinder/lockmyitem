@@ -2069,11 +2069,11 @@ function DetailPage({ item, items, comments = [], claimRequests = [], onBack, cl
         <form className="claim-verify-card" onSubmit={submitClaimDescription}>
           <span className="section-kicker">认领前确认</span>
           <strong>请先描述物品特征</strong>
-          <p>请优先描述颜色、外观、卡套、标志或使用痕迹。不要在页面示例或评论中展示个人敏感信息。</p>
+          <p>可以填写卡号、姓名、学号等可核验信息；系统仅用于后端匹配并脱敏处理，不会公开展示。不要只写“我的卡”“是我的”。</p>
           <textarea
             className="field textarea"
             value={claimDescription}
-            placeholder="例如：蓝色卡套；背面有圆形贴纸；边角有磨损"
+            placeholder="例如：蓝色卡套；上海银行标志；姓名或卡面编号"
             onChange={(event) => setClaimDescription(event.target.value)}
           />
           {claimVerifyMessage && <div className="privacy-notice">{claimVerifyMessage}</div>}
