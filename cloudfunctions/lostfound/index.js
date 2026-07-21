@@ -913,10 +913,9 @@ function buildVisionPrompt(hint = '', purpose = 'item', itemType = '') {
   ].join('\n');
 }
 
-async function callOpenAICompatibleHunyuanVision(payload) {
+async function callOpenAICompatibleHunyuanVisionJson({ imageUrl, prompt, temperature = 0.2 }) {
   const fetchClient = getFetch();
   const endpoint = `${HUNYUAN_CONFIG.baseUrl}/chat/completions`;
-  const prompt = buildVisionPrompt(payload.hint, payload.purpose, payload.itemType);
 
   const response = await fetchClient(endpoint, {
     method: 'POST',
@@ -930,12 +929,12 @@ async function callOpenAICompatibleHunyuanVision(payload) {
         {
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: payload.imageUrl } },
+            { type: 'image_url', image_url: { url: imageUrl } },
             { type: 'text', text: prompt }
           ]
         }
       ],
-      temperature: 0.2
+      temperature
     }),
     timeout: 30000
   });
@@ -946,22 +945,22 @@ async function callOpenAICompatibleHunyuanVision(payload) {
     throw new Error(`混元识别失败 ${response.status}${message ? `: ${message}` : ''}`);
   }
   const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-  return normalizeHunyuanResult(parseJsonContent(content || ''));
+  return parseJsonContent(content || '');
 }
 
-async function callTencentCloudHunyuanVision(payload) {
+async function callTencentCloudHunyuanVisionJson({ imageUrl, prompt, temperature = 0.2 }) {
   const fetchClient = getFetch();
   const endpointHost = new URL(HUNYUAN_CONFIG.tencentEndpoint).host;
   const requestBody = {
     Model: HUNYUAN_CONFIG.model,
     Stream: false,
-    Temperature: 0.2,
+    Temperature: temperature,
     Messages: [
       {
         Role: 'user',
         Contents: [
-          { Type: 'text', Text: buildVisionPrompt(payload.hint, payload.purpose, payload.itemType) },
-          { Type: 'image_url', ImageUrl: { Url: payload.imageUrl } }
+          { Type: 'text', Text: prompt },
+          { Type: 'image_url', ImageUrl: { Url: imageUrl } }
         ]
       }
     ]
@@ -992,7 +991,34 @@ async function callTencentCloudHunyuanVision(payload) {
   }
   const choices = (data.Response && data.Response.Choices) || data.Choices || [];
   const content = choices[0] && choices[0].Message && choices[0].Message.Content;
-  return normalizeHunyuanResult(parseJsonContent(content || ''));
+  return parseJsonContent(content || '');
+}
+
+async function callHunyuanVisionJson(payload) {
+  if (HUNYUAN_CONFIG.secretId && HUNYUAN_CONFIG.secretKey) {
+    return callTencentCloudHunyuanVisionJson(payload);
+  }
+  return callOpenAICompatibleHunyuanVisionJson(payload);
+}
+
+async function callOpenAICompatibleHunyuanVision(payload) {
+  const prompt = buildVisionPrompt(payload.hint, payload.purpose, payload.itemType);
+  const raw = await callOpenAICompatibleHunyuanVisionJson({
+    imageUrl: payload.imageUrl,
+    prompt,
+    temperature: 0.2
+  });
+  return normalizeHunyuanResult(raw);
+}
+
+async function callTencentCloudHunyuanVision(payload) {
+  const prompt = buildVisionPrompt(payload.hint, payload.purpose, payload.itemType);
+  const raw = await callTencentCloudHunyuanVisionJson({
+    imageUrl: payload.imageUrl,
+    prompt,
+    temperature: 0.2
+  });
+  return normalizeHunyuanResult(raw);
 }
 
 async function callHunyuanVision(payload) {
@@ -1000,80 +1026,6 @@ async function callHunyuanVision(payload) {
     return callTencentCloudHunyuanVision(payload);
   }
   return callOpenAICompatibleHunyuanVision(payload);
-}
-
-async function callOpenAICompatibleHunyuanText(prompt) {
-  const fetchClient = getFetch();
-  const response = await fetchClient(`${HUNYUAN_CONFIG.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${HUNYUAN_CONFIG.apiKey}`,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: HUNYUAN_CONFIG.model,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1
-    }),
-    timeout: 30000
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = data.error && (data.error.message || data.error.code);
-    throw new Error(`混元文本判断失败 ${response.status}${message ? `: ${message}` : ''}`);
-  }
-  const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-  return parseJsonContent(content || '');
-}
-
-async function callTencentCloudHunyuanText(prompt) {
-  const fetchClient = getFetch();
-  const endpointHost = new URL(HUNYUAN_CONFIG.tencentEndpoint).host;
-  const requestBody = {
-    Model: HUNYUAN_CONFIG.model,
-    Stream: false,
-    Temperature: 0.1,
-    Messages: [
-      {
-        Role: 'user',
-        Contents: [{ Type: 'text', Text: prompt }]
-      }
-    ]
-  };
-  const payloadText = JSON.stringify(requestBody);
-  const timestamp = Math.floor(Date.now() / 1000);
-  const headers = {
-    authorization: signTencentCloudRequest(payloadText, timestamp),
-    'content-type': 'application/json; charset=utf-8',
-    host: endpointHost,
-    'x-tc-action': HUNYUAN_CONFIG.tencentAction,
-    'x-tc-timestamp': String(timestamp),
-    'x-tc-version': HUNYUAN_CONFIG.tencentVersion
-  };
-  if (HUNYUAN_CONFIG.tencentRegion) headers['x-tc-region'] = HUNYUAN_CONFIG.tencentRegion;
-
-  const response = await fetchClient(HUNYUAN_CONFIG.tencentEndpoint, {
-    method: 'POST',
-    headers,
-    body: payloadText,
-    timeout: 30000
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || (data.Response && data.Response.Error)) {
-    const error = data.Response && data.Response.Error;
-    const message = error && (error.Message || error.Code);
-    throw new Error(`混元文本判断失败 ${response.status}${message ? `: ${message}` : ''}`);
-  }
-  const choices = (data.Response && data.Response.Choices) || data.Choices || [];
-  const content = choices[0] && choices[0].Message && choices[0].Message.Content;
-  return parseJsonContent(content || '');
-}
-
-async function callHunyuanTextJson(prompt) {
-  if (HUNYUAN_CONFIG.secretId && HUNYUAN_CONFIG.secretKey) {
-    return callTencentCloudHunyuanText(prompt);
-  }
-  return callOpenAICompatibleHunyuanText(prompt);
 }
 
 function mapTagsToCategory(tags = [], hint = '') {
@@ -1606,11 +1558,20 @@ function normalizeClaimDescription(value = '') {
   return maskSensitiveText(text).text;
 }
 
-function buildClaimVerificationPrompt(item = {}, description = '') {
+function claimVerificationImageUrl(item = {}) {
+  return unique([
+    ...(item.imageUrls || []),
+    item.thumbUrl,
+    item.image
+  ])
+    .map((value) => normalizeImageUrl(value))
+    .find((value) => isHttpUrl(value) && !isDataImageUrl(value) && !isCloudFileId(value)) || '';
+}
+
+function buildClaimVisionVerificationPrompt(item = {}, description = '') {
   const safeItem = sanitizeFoundItemPrivacy(item);
   const context = {
     title: safeItem.title || '',
-    description: safeItem.description || '',
     category: safeItem.category || '',
     tags: unique([
       ...(safeItem.aiTags || []),
@@ -1618,22 +1579,21 @@ function buildClaimVerificationPrompt(item = {}, description = '') {
       ...(safeItem.yoloObjects || []),
       ...(safeItem.tags || [])
     ]).slice(0, 12),
-    visualDescription: safeItem.visualDescription || '',
     location: itemLocationText(safeItem)
   };
   return [
-    '你是校园失物招领系统的认领描述核验助手。',
-    '任务：判断“认领人描述”是否与“招领物品公开信息”相符。',
-    '只比较颜色、类别、外观、配件、挂件、材质、地点、使用痕迹等非敏感特征。',
-    '不要要求、输出或复述完整卡号、身份证号、手机号、工号、学号、护照号或任何证件唯一编号。',
-    '只要描述包含一个或多个可比对的非敏感特征，且没有明显矛盾，可以返回 match。',
-    '不要因为描述不完整、没有覆盖所有细节、或没有提供敏感编号而拒绝。',
-    '只有描述完全空泛、只表达“是我的”、或明显不匹配时，才返回 uncertain 或 mismatch。',
+    '你是校园失物招领系统的认领视觉核验助手。',
+    '任务：根据图片中可见的非敏感特征，判断“认领人描述”是否可能对应这件招领物品。',
+    '只比较颜色、外观、卡套/保护套、贴纸、挂件、材质、磨损、图案、边角状态、配件、放置环境等非敏感特征。',
+    '不要识别、要求、输出或复述完整卡号、身份证号、手机号、工号、学号、护照号、姓名、二维码、条码或任何唯一编号。',
+    '认领人描述不需要完整覆盖图片；只要包含一个或多个图片可见的非敏感特征，且没有明显矛盾，可以返回 match。',
+    '如果描述只是“是我的”“我丢的”等没有可见特征，返回 uncertain。',
+    '如果描述与图片明显矛盾，例如颜色、卡套、贴纸、外观类型完全不一致，返回 mismatch。',
     '必须只返回 JSON，不要 Markdown，不要解释。',
     'JSON 字段：decision, confidence, reason。',
     'decision 只能是 match、uncertain、mismatch。',
     'confidence 是 0 到 1 的数字。',
-    `招领物品公开信息：${JSON.stringify(context)}`,
+    `招领物品脱敏上下文：${JSON.stringify(context)}`,
     `认领人描述：${description}`
   ].join('\n');
 }
@@ -1652,8 +1612,23 @@ async function verifyClaimDescriptionWithModel(item = {}, description = '') {
   if (!HUNYUAN_CONFIG.apiKey && !(HUNYUAN_CONFIG.secretId && HUNYUAN_CONFIG.secretKey)) {
     throw new Error('模型未配置');
   }
-  const raw = await callHunyuanTextJson(buildClaimVerificationPrompt(item, description));
-  return normalizeClaimModelDecision(raw);
+  const imageUrl = claimVerificationImageUrl(item);
+  if (!imageUrl) {
+    return normalizeClaimModelDecision({
+      decision: 'uncertain',
+      confidence: 0,
+      reason: '缺少可用于视觉核验的图片，转人工确认'
+    });
+  }
+  const raw = await callHunyuanVisionJson({
+    imageUrl,
+    prompt: buildClaimVisionVerificationPrompt(item, description),
+    temperature: 0.1
+  });
+  return {
+    ...normalizeClaimModelDecision(raw),
+    method: 'vision'
+  };
 }
 
 async function getLatestClaimRequest(itemId, claimantOpenid) {
@@ -1781,7 +1756,8 @@ async function verifyClaimDescription(event, context) {
   if (item.status === 'returned') return fail('该物品已回家，不能重复认领', 'ALREADY_RETURNED');
   if (item.ownerOpenid === actor.actorId) return fail('不能认领自己发布的物品', 'FORBIDDEN');
 
-  const safeItem = sanitizeFoundItemPrivacy(item);
+  const hydratedItem = (await hydrateItemImages([item]))[0] || item;
+  const safeItem = sanitizeFoundItemPrivacy(hydratedItem);
   if (!isProtectedFoundItem(safeItem)) {
     return ok({
       status: 'verified',

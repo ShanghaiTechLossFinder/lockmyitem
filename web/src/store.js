@@ -491,7 +491,7 @@ export function createLocalComment(itemId, content, currentUser) {
 }
 
 export async function verifyClaimDescription(itemId, description) {
-  const data = await callLostfound('verifyClaimDescription', { itemId, description }, 20000);
+  const data = await callLostfound('verifyClaimDescription', { itemId, description }, 35000);
   return {
     ...data,
     requestId: data.requestId || data.request?._id || data.request?.id || '',

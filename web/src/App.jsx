@@ -1980,7 +1980,7 @@ function DetailPage({ item, items, comments = [], claimRequests = [], onBack, cl
       if (result?.status === 'verified') {
         setClaimVerifyMessage('描述已通过，请查看图片后确认认领。');
       } else if (result?.status === 'pending_review') {
-        setClaimVerifyMessage('模型未直接通过，已提交发布者人工确认。');
+        setClaimVerifyMessage('视觉核验未直接通过，已提交发布者人工确认。');
       } else if (result?.status === 'forbidden') {
         setClaimVerifyMessage('不能认领自己发布的物品。');
       } else {
