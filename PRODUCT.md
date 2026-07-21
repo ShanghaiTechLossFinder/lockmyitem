@@ -5,7 +5,7 @@
 product
 
 ## Users
-ShanghaiTech students, staff, and campus community members using a WeChat mini-program in short, mobile-first moments: after finding an item, after losing something, or while checking whether a found item matches theirs.
+ShanghaiTech students, staff, and campus community members using a mobile-first web/PWA app in short moments: after finding an item, after losing something, or while checking whether a found item matches theirs.
 
 ## Product Purpose
 The product helps campus users publish found items, search for lost items, identify item tags with AI, confirm campus locations, and manage recovery status. Success means a user can understand the right workflow within seconds, trust the location and item information, and complete publishing or matching without friction.
@@ -14,7 +14,7 @@ The product helps campus users publish found items, search for lost items, ident
 Calm, trustworthy, campus-native. The interface should feel like a polished university service: warm enough for peer help, structured enough for repeated daily use, and precise enough for location-sensitive matching.
 
 ## Anti-references
-Avoid generic SaaS landing-page tropes, over-decorated gradients, childish lost-and-found illustrations, oversized marketing heroes, and bland gray forms that make the mini-program feel unfinished. Avoid UI that hides the practical tasks behind decoration.
+Avoid generic SaaS landing-page tropes, over-decorated gradients, childish lost-and-found illustrations, oversized marketing heroes, and bland gray forms that make the web app feel unfinished. Avoid UI that hides the practical tasks behind decoration.
 
 ## Design Principles
 - Prioritize quick recovery over presentation: the primary action on each screen should be obvious.

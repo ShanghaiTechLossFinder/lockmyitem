@@ -1,9 +1,5 @@
 # Dependencies
 node_modules/
-miniprogram_npm/
-
-# WeChat DevTools local settings
-project.private.config.json
 .idea/
 .vscode/
 

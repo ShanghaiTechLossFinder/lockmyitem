@@ -1,6 +1,6 @@
 # 上科大失物招领 Web/PWA 版本
 
-这个目录新增了一个独立的网页端应用：`web/`。它不依赖微信小程序审核，可以直接部署成网页，并支持从手机浏览器安装到桌面。
+`web/` 是当前唯一维护主线。它不依赖微信小程序审核，可以直接部署成网页，并支持从手机浏览器安装到桌面。
 
 ## 本地运行
 
@@ -27,7 +27,7 @@ npm run build
 
 ## 网页端混元图像识别
 
-网页端必须通过服务端调用混元大模型，不能把混元 API Key 写进浏览器代码。当前前端优先复用小程序同一个云函数：
+网页端必须通过服务端调用混元大模型，不能把混元 API Key 写进浏览器代码。当前前端优先调用 CloudBase `lostfound` 云函数：
 
 ```bash
 VITE_TCB_ENV_ID=cloud1-d9gnyuxf5b44b6b92
@@ -38,7 +38,7 @@ VITE_TCB_ACCESS_KEY=CloudBase Web Publishable Key
 
 可以复制 `web/.env.production.example` 为 `web/.env.production`，只在本地或部署平台配置真实 `VITE_TCB_ACCESS_KEY`，不要把真实 key 提交到 GitHub。
 
-调用数据与小程序一致：
+前端与云函数的调用约定：
 
 ```js
 {
@@ -123,8 +123,8 @@ npm run build
 - 分类与关键词筛选
 - 校园地图标记
 - 发布招领/寻物
-- 本地自动分类与相似匹配
-- 详情页、标记已找回
-- 我的发布与浏览器安装入口
+- 图片识别、分类与相似匹配
+- 详情页、评论、认领、标记已找回
+- 邮箱登录、昵称维护、我的发布与浏览器安装入口
 
 网页端数据优先通过 CloudBase 调用 `lostfound` 云函数的 `listItems`、`createItem`、`getItemDetail`、`createComment`、`markReturned` 和 `undoReturned` action；浏览器 `localStorage` 仅作为加载失败或离线时的缓存兜底。

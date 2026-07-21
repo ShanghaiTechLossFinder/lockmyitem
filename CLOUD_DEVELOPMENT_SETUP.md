@@ -1,20 +1,31 @@
-# WeChat CloudBase Setup
+# CloudBase Backend Setup
 
-Mini program cloud environment:
+CloudBase environment:
 
 ```text
 cloud1-d9gnyuxf5b44b6b92
 ```
 
-The mini program now calls `cloudfunctions/lostfound` for image recognition when this value in `miniprogram/app.js` is empty:
+The web app calls `cloudfunctions/lostfound` through the CloudBase Web SDK. This function handles item data, comments, email auth, claim/return flows, match notifications, and Hunyuan image recognition.
 
-```js
-const MODEL_API_URL = '';
+## Web Environment Variables
+
+Configure these values for the web build or copy `web/.env.production.example` to a local production env file:
+
+```env
+VITE_CLOUDBASE_ENV_ID=cloud1-d9gnyuxf5b44b6b92
+VITE_CLOUDBASE_FUNCTION_NAME=lostfound
+VITE_CLOUDBASE_REGION=ap-shanghai
+VITE_CLOUDBASE_ACCESS_KEY=
 ```
+
+Leave `VITE_CLOUDBASE_ACCESS_KEY` empty only when anonymous login is enabled for this CloudBase environment.
 
 ## Cloud Function Environment Variables
 
-Configure these variables in the WeChat DevTools CloudBase console for `cloudfunctions/lostfound`.
+Configure these variables in the CloudBase console for `cloudfunctions/lostfound`.
+
+Tencent Cloud signed Hunyuan mode:
 
 ```env
 TENCENT_SECRET_ID=your-secret-id
@@ -49,46 +60,36 @@ SMTP_FROM=LockMyItem <your-sender@example.com>
 
 ## Deploy
 
-1. Open the project in WeChat DevTools.
-2. Make sure CloudBase environment is `cloud1-d9gnyuxf5b44b6b92`.
-3. Right-click `cloudfunctions/lostfound`.
-4. Choose `Upload and deploy: cloud install dependencies`.
-5. Recompile the mini program and test image recognition.
+Use the CloudBase project configuration in `cloudbaserc.json` and deploy `cloudfunctions/lostfound` with cloud-side dependency installation. The function configuration is:
 
-## Timeout
+```text
+runtime: Nodejs16.13
+handler: index.main
+timeout: 30
+memorySize: 512
+```
 
-Image recognition calls can take more than the CloudBase default 3 seconds. The project includes:
+The same timeout and memory settings are also recorded in:
 
 ```text
 cloudfunctions/lostfound/config.json
 ```
 
-with:
-
-```json
-{
-  "timeout": 30,
-  "memorySize": 512
-}
-```
-
-If the CloudBase console still reports `FUNCTIONS_TIME_LIMIT_EXCEEDED`, open `lostfound` in the CloudBase console and set the function timeout to 30 seconds manually, then deploy again.
+If the CloudBase console reports `FUNCTIONS_TIME_LIMIT_EXCEEDED`, set the `lostfound` timeout to 30 seconds manually and deploy again.
 
 ## Test classifyImage
-
-Use a direct image URL that can be downloaded by Tencent Cloud. Do not use search result pages such as Bing Image detail URLs. Some school website assets may return `403 Forbidden` to cloud-side requests and will be rejected by Hunyuan as invalid images.
 
 Cloud function test event:
 
 ```json
 {
   "action": "classifyImage",
-  "imageUrl": "https://raw.githubusercontent.com/shaolq07/shanghaitech_findloss/main/web/src/assets/items/umbrella.jpg",
+  "imageUrl": "https://raw.githubusercontent.com/lockmuitem/lockmyitem/main/web/src/assets/items/umbrella.jpg",
   "hint": "雨伞，校园失物招领图片识别测试"
 }
 ```
 
-Expected result:
+Expected shape:
 
 ```json
 {
@@ -104,4 +105,4 @@ Expected result:
 }
 ```
 
-Do not commit real API keys. Keep them only in CloudBase environment variables.
+Do not commit real API keys, SMTP credentials, tokens, cookies, or CloudBase Publishable Keys.

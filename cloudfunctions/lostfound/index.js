@@ -914,7 +914,7 @@ async function ensureUser(openid, profile = {}) {
     return userResult.data[0];
   }
   const user = {
-    nickName: profile.nickName || '微信用户',
+    nickName: profile.nickName || '网页用户',
     avatarUrl: profile.avatarUrl || '',
     createdAt: now(),
     updatedAt: now()
@@ -1498,7 +1498,7 @@ async function createItem(event, context) {
     longitude: location ? location.longitude : customLongitude,
     status: 'active',
     ownerOpenid: actor.actorId,
-    ownerName: payload.ownerName || '微信用户',
+    ownerName: payload.ownerName || '网页用户',
     createdAt: now(),
     updatedAt: now()
   };
@@ -1560,7 +1560,7 @@ async function createComment(event, context) {
   const data = {
     itemId: event.itemId,
     authorOpenid: actor.actorId,
-    authorName: event.authorName || '微信用户',
+    authorName: event.authorName || '网页用户',
     content,
     status: 'active',
     createdAt: now()

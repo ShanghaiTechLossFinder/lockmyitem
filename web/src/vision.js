@@ -211,11 +211,11 @@ async function classifyViaCloudbase(imageDataUrl, hint, options = {}) {
       }
     }),
     30000,
-    '调用小程序云函数混元识别超时'
+    '调用 CloudBase 云函数混元识别超时'
   );
   const body = unwrapCloudFunctionResponse(response);
   if (!body.ok) {
-    throw new Error(body.message || body.error || '小程序云函数 classifyImage 返回失败');
+    throw new Error(body.message || body.error || 'CloudBase 云函数 classifyImage 返回失败');
   }
   return normalizeRemoteData(body.data);
 }
@@ -252,7 +252,7 @@ export async function recognizeImageFile(file, hint = '', options = {}) {
   try {
     data = await classifyViaCloudbase(compressed, textHint, options);
   } catch (error) {
-    errors.push(`小程序云函数混元识别失败：${readableError(error)}`);
+    errors.push(`CloudBase 云函数混元识别失败：${readableError(error)}`);
   }
 
   if (!data) {

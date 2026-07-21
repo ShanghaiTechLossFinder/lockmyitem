@@ -1,117 +1,72 @@
-# 上科大校园失物招领小程序
+# LockMyItem Web/PWA
 
-这是一个面向上海科技大学校园场景的微信小程序 MVP，用于失物招领、寻物发布、校内地点选择和相似物品提醒。当前版本默认使用本地 mock 数据，无需云环境即可在微信开发者工具里预览核心流程。
+面向上海科技大学校园场景的失物招领网页端。当前唯一主线是 `web/` React PWA，后端能力由 `cloudfunctions/lostfound` 这个 CloudBase 云函数提供。
 
-## 当前版本亮点
+## 当前主线
 
-- `失物招领` 与 `寻物` 两个独立板块，分别展示捡到的物品和正在寻找的物品。
-- 发布页支持图片、标题、描述、分类、校内地图自由点选、地点搜索和手动确认。
-- 使用上科大校内地点库，地点包含学院楼、图书馆、教学中心、宿舍、餐饮点、体育设施和出入口。
-- 校园地点坐标已按腾讯地图使用的 GCJ-02 坐标系校准，避免图书馆等地点显示偏移。
-- “我的”页支持注册资料维护，包含昵称和邮箱。
-- 发布寻物时会自动检索已有招领信息，按类别、颜色、外观细节、配件、地点等计算相似度。
-- 示例：输入“黑色雨伞，上面有红色钥匙扣”会匹配“黑色折叠伞，带红色钥匙扣”。
-- 详情页支持评论、感谢发布人、举报、标记“已回家”和撤回。
+- `web/`：浏览器与 PWA 前端，包含列表、发布、详情、评论、认领、归还状态、邮箱登录、图片识别入口和桌面安装提示。
+- `cloudfunctions/lostfound/`：CloudBase 后端，提供数据读写、邮箱验证码/登录、评论、认领、归还状态、图片识别和通知邮件。
+- `database.seed.json`：CloudBase 集合初始化数据，主要用于 `campus_locations`。
+- `database.rules.json`：数据库权限建议。
+- `cloudbaserc.json`：CloudBase 云函数部署配置。
 
-## 如何打开
+旧微信小程序源码已不再作为维护主线保留。它里面仍然有价值的部分已经在 web 端对应落位：
 
-1. 打开微信开发者工具。
-2. 导入项目根目录：
+- 分类和相似匹配逻辑：`web/src/utils.js`、`web/src/data.js`
+- 校园地点和地图数据：`web/src/campusMapData.js`
+- 示例物品、公告栏和 tabbar 资产：`web/src/assets/`
+- 云端数据与模型调用：`web/src/store.js`、`web/src/vision.js`、`cloudfunctions/lostfound/`
 
-   `D:\Uni1.2\做点好玩的\AI创赛--校园失物招领系统`
+## 本地运行
 
-3. AppID 可先使用测试号，或替换 `project.config.json` 中的 `appid`。
-4. 直接点击“编译”即可使用本地 mock 数据。
-5. 如果页面仍显示旧内容，执行“工具 -> 清缓存 -> 清除全部缓存并重新编译”。
-
-## 主要页面
-
-- `pages/index/index`：失物招领，展示同学捡到的物品。
-- `pages/map/map`：寻物，展示同学正在寻找的物品。当前沿用旧页面路径，但 tab 文案已改为“寻物”。
-- `pages/publish/publish`：发布招领或寻物，支持校内地图点选、地点选择和相似物品提醒。
-- `pages/detail/detail`：物品详情、校内地点卡、评论、感谢、举报和已回家操作。
-- `pages/found/found`：已找到分区。
-- `pages/messages/messages`：消息中心。
-- `pages/me/me`：我的资料、邮箱、我的发布。
-
-## 校内地点库
-
-发布页支持多种地点确认方式：用户可以在内置校内地图上自由点选位置，系统会按附近校内地点自动生成位置描述；也可以搜索上科大校内地点后手动确认。
-
-地点库位于：
-
-`miniprogram/utils/locations.js`
-
-地点数据包含：
-
-- 图书馆
-- 生命科学与技术学院
-- 信息科学与技术学院
-- 物质科学与技术学院
-- 创业与管理学院
-- 创意与艺术学院
-- 教学中心、行政中心、报告厅、学生科创中心、校园服务中心
-- 丝路餐厅、尚科美食广场、西餐厅、白玉兰餐厅、清真餐厅、KFC
-- 学生公寓、教师公寓、体育馆、游泳馆、会议中心、校门
-
-地图显示使用腾讯地图坐标系，地点库代码中保留 WGS84 到 GCJ-02 的转换逻辑。
-
-### 位置隐私边界
-
-当前版本不调用普通定位接口，也不采集无线或蓝牙信号。发布地点只来自用户在校内地图上的手动点选、地点搜索或人工输入，避免触发微信位置权限审核。
-
-## 相似物品匹配
-
-当前版本已有本地可运行的相似匹配 MVP，入口在：
-
-`miniprogram/utils/matcher.js`
-
-匹配逻辑会提取：
-
-- 物品类别，例如雨伞、校园卡、水杯
-- 颜色，例如黑色、红色、蓝色
-- 外观描述，例如折叠、长柄、透明
-- 配件细节，例如钥匙扣、贴纸、挂绳、刻字、划痕
-- 标题和描述里的语义关键词
-- 地点是否一致或相近
-
-只有相似度超过阈值时，发布页才会显示“可能是你的物品”；没有匹配则不显示。
-
-## 接入腾讯云混元图像识别
-
-当前分支已改为云函数直接调用腾讯云混元多模态模型：图片上传到云存储后，云函数获取临时图片链接，调用混元视觉模型生成图片 tags。小程序端不直接保存 API key。
-
-需要配置云函数环境变量：
-
-```text
-HUNYUAN_API_KEY=腾讯云混元 API Key
-HUNYUAN_MODEL=hunyuan-vision
-HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
+```powershell
+cd web
+npm install
+npm run dev
 ```
 
-说明：
+打开终端输出的本地地址，例如 `http://localhost:5173`。
 
-- `HUNYUAN_API_KEY`：在腾讯云混元控制台/API Key 管理页面获取。
-- `HUNYUAN_MODEL`：可按腾讯云控制台支持的视觉模型名称调整。
-- `HUNYUAN_BASE_URL`：默认使用腾讯云混元 OpenAI 兼容接口，一般不用改。
-- 不再需要 `YOLO_API_URL`、`SEMANTIC_API_URL` 或自建 `model-service`。
+## 生产构建
 
-调用链路：
+```powershell
+cd web
+npm run build
+```
 
-1. 小程序上传图片到云存储。
-2. 云函数拿到图片临时链接。
-3. 云函数调用混元 `/chat/completions`，传入 `image_url` 和用户填写的标题/描述。
-4. 混元返回结构化描述：物品类别、颜色、配件、特殊标记、自然语言 caption。
-5. 将 `visualDescription`、`semanticTags`、`aiTags` 写入物品记录。
-6. 用户发布寻物时，对历史招领物品做相似度检索。
+构建产物输出到 `web/dist/`，可部署到 GitHub Pages、Vercel、Netlify、腾讯云静态网站托管或任意静态站点服务。
 
-模型接口约定见：
+## CloudBase 配置
 
-`MODEL_API_CONTRACT.md`
+web 前端默认调用 CloudBase 环境：
 
-## 云开发部署
+```env
+VITE_CLOUDBASE_ENV_ID=cloud1-d9gnyuxf5b44b6b92
+VITE_CLOUDBASE_FUNCTION_NAME=lostfound
+VITE_CLOUDBASE_REGION=ap-shanghai
+VITE_CLOUDBASE_ACCESS_KEY=
+```
 
-如果需要从本地 mock 切到真实云端，需要创建以下集合：
+可复制 `web/.env.production.example` 为本地或部署平台环境变量模板。真实 Publishable Key、SMTP 密码、混元 API Key 和腾讯云 Secret 必须只放在本地环境或 CloudBase 环境变量中，不要提交到仓库。
+
+`lostfound` 云函数依赖的服务端环境变量见 `CLOUD_DEVELOPMENT_SETUP.md`。图片识别接口约定见 `MODEL_API_CONTRACT.md`。
+
+## 主要功能
+
+- 失物招领、寻物、已找回列表
+- 分类筛选与关键词搜索
+- 校园地图点选和地点详情补充
+- 发布招领或寻物信息
+- 图片识别生成类别、标签和描述
+- 寻物发布后匹配已有招领信息
+- 邮箱验证码/密码登录和昵称维护
+- 评论、认领、标记已找回、撤回归还状态
+- CloudBase 同步失败时使用浏览器本地缓存兜底
+- HTTPS 部署后支持添加到手机或桌面
+
+## 数据集合
+
+CloudBase 环境需要以下集合：
 
 - `users`
 - `items`
@@ -121,45 +76,11 @@ HUNYUAN_BASE_URL=https://api.hunyuan.cloud.tencent.com/v1
 - `reports`
 - `campus_locations`
 
-部署步骤：
+初始化地点数据时，将 `database.seed.json` 中的 `campus_locations` 导入同名集合。
 
-1. 在微信云开发控制台创建集合。
-2. 将 `database.seed.json` 中的 `campus_locations` 导入同名集合。
-3. 上传并部署 `cloudfunctions/lostfound`。
-4. 将前端 `utils/store.js` 中的本地方法逐步替换为 `wx.cloud.callFunction`。
+## 隐私和安全边界
 
-云函数 action：
-
-- `login`
-- `createItem`
-- `classifyImage`
-- `listItems`
-- `getItemDetail`
-- `listLocations`
-- `createComment`
-- `sendThanks`
-- `markReturned`
-- `undoReturned`
-- `reportContent`
-
-## 开发说明
-
-- 当前分支：`slqs-branch`
-- 本地数据入口：`miniprogram/utils/store.js`
-- 分类关键词：`miniprogram/utils/constants.js`
-- 地点库：`miniprogram/utils/locations.js`
-- 相似匹配：`miniprogram/utils/matcher.js`
-- 云函数：`cloudfunctions/lostfound/index.js`
-
-## 发布隐私检查
-
-正式提交审核前，需要在微信开发者工具和微信公众平台后台确认隐私声明与实际调用一致：
-
-当前版本不调用普通定位接口，不依赖第三方地图插件，也不采集无线或蓝牙信号。提交审核时不需要为发布页声明位置、无线或蓝牙相关接口。
-
-## 已知限制
-
-- 图像识别依赖腾讯云混元 API，未配置 `HUNYUAN_API_KEY` 或腾讯云 `SecretId/SecretKey` 时会返回 `MODEL_NOT_CONFIGURED`。
-- 本地 mock 数据只存在于微信开发者工具本地缓存中。
-- 邮箱字段已保存，但邮件通知尚未接入实际发送服务。
-- 正式上线前需要配置真实 AppID 和云开发环境。
+- 浏览器端不保存混元 API Key、腾讯云 Secret、SMTP 密码或服务端 token。
+- 图片识别通过 CloudBase 云函数或受保护的后端代理调用模型。
+- 发布地点来自用户手动点选、地点搜索或手动输入，不依赖浏览器定位权限。
+- 浏览器 `localStorage` 只作为离线或云端加载失败时的缓存兜底。
