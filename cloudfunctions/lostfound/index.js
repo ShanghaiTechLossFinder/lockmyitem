@@ -1555,7 +1555,7 @@ function normalizeClaimDescription(value = '') {
     .replace(/\s{2,}/g, ' ')
     .trim()
     .slice(0, CLAIM_CONFIG.maxDescriptionLength);
-  return maskSensitiveText(text).text;
+  return maskSensitiveText(text, { maskNames: false }).text;
 }
 
 function claimVerificationImageUrl(item = {}) {
@@ -1584,9 +1584,13 @@ function buildClaimVisionVerificationPrompt(item = {}, description = '') {
   return [
     '你是校园失物招领系统的认领视觉核验助手。',
     '任务：根据图片中可见的非敏感特征，判断“认领人描述”是否可能对应这件招领物品。',
-    '只比较颜色、外观、卡套/保护套、贴纸、挂件、材质、磨损、图案、边角状态、配件、放置环境等非敏感特征。',
-    '不要识别、要求、输出或复述完整卡号、身份证号、手机号、工号、学号、护照号、姓名、二维码、条码或任何唯一编号。',
+    '优先比较颜色、外观、卡套/保护套、贴纸、挂件、材质、磨损、图案、边角状态、配件、放置环境等非敏感特征。',
+    '如果认领人主动提供姓名或学号等身份线索，你可以只在内部比对其是否与图片一致，用于判断是否 match。',
+    '不要要求用户补充完整卡号、身份证号、手机号、工号、学号、护照号、二维码、条码或任何唯一编号。',
+    '不要在输出中复述具体姓名、学号、卡号、证件号、手机号、二维码或条码内容。',
+    '如果图片显示上海银行标志但上下文或描述指向校园卡，应视为可能的联名/借记校园卡，不要仅因“银行卡/校园卡”称呼不同而拒绝。',
     '认领人描述不需要完整覆盖图片；只要包含一个或多个图片可见的非敏感特征，且没有明显矛盾，可以返回 match。',
+    '如果认领人主动提供的姓名或学号与图片一致，即使其他描述较短，也可以返回 match。',
     '如果描述只是“是我的”“我丢的”等没有可见特征，返回 uncertain。',
     '如果描述与图片明显矛盾，例如颜色、卡套、贴纸、外观类型完全不一致，返回 mismatch。',
     '必须只返回 JSON，不要 Markdown，不要解释。',
@@ -1601,10 +1605,11 @@ function buildClaimVisionVerificationPrompt(item = {}, description = '') {
 function normalizeClaimModelDecision(raw = {}, fallbackReason = '') {
   const decision = ['match', 'uncertain', 'mismatch'].includes(raw.decision) ? raw.decision : 'uncertain';
   const confidence = Math.max(0, Math.min(1, Number(raw.confidence) || 0));
+  const maskedReason = maskSensitiveText(raw.reason || fallbackReason || '需要发布者人工确认').text;
   return {
     decision,
     confidence,
-    reason: cleanClaimField(raw.reason || fallbackReason || '需要发布者人工确认', '需要发布者人工确认', 160)
+    reason: cleanClaimField(maskedReason, '需要发布者人工确认', 160)
   };
 }
 
@@ -1656,6 +1661,18 @@ async function getApprovedClaimRequest(requestId, itemId, claimantOpenid) {
   if (!request) return null;
   if (request.itemId !== itemId || request.claimantOpenid !== claimantOpenid || request.status !== 'approved') return null;
   return { _id: requestId, ...request };
+}
+
+async function markClaimRequestModelVerified(request = {}, description = '', modelDecision = {}) {
+  if (!request || request.status !== 'pending_review' || !request._id) return null;
+  const data = {
+    description,
+    status: 'model_verified',
+    modelDecision,
+    updatedAt: now()
+  };
+  await db.collection(COLLECTIONS.claimRequests).doc(request._id).update({ data });
+  return { ...request, ...data };
 }
 
 async function upsertPendingClaimRequest({ item, itemId, claimantOpenid, claimantUser, description, modelDecision, attemptCount, existingRequest }) {
@@ -1770,7 +1787,12 @@ async function verifyClaimDescription(event, context) {
 
   const claimantUser = await getUserByActorId(actor.actorId);
   const existingRequest = await getLatestClaimRequest(event.itemId, actor.actorId);
-  if (existingRequest && existingRequest.status === 'pending_review') {
+  if (
+    existingRequest
+    && existingRequest.status === 'pending_review'
+    && existingRequest.description === description
+    && existingRequest.modelDecision?.method === 'vision'
+  ) {
     return ok({
       status: 'pending_review',
       requestId: existingRequest._id,
@@ -1788,6 +1810,9 @@ async function verifyClaimDescription(event, context) {
   }
 
   if (modelDecision.decision === 'match' && modelDecision.confidence >= CLAIM_CONFIG.minModelConfidence) {
+    await markClaimRequestModelVerified(existingRequest, description, modelDecision).catch((error) => {
+      console.warn('Failed to update claim request after model verification.', error && (error.message || error));
+    });
     return ok({
       status: 'verified',
       verified: true,

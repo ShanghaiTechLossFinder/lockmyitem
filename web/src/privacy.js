@@ -58,9 +58,10 @@ function replaceSensitivePattern(text, pattern, replacement, reason, reasons) {
   return nextText;
 }
 
-export function maskSensitiveText(value = '') {
+export function maskSensitiveText(value = '', options = {}) {
   const reasons = [];
   let text = String(value || '');
+  const maskNames = options.maskNames !== false;
 
   text = replaceSensitivePattern(
     text,
@@ -78,11 +79,20 @@ export function maskSensitiveText(value = '') {
   );
   text = replaceSensitivePattern(
     text,
-    /((?:身份证|学生证|工作证|工卡|校园卡|一卡通|饭卡|银行卡|信用卡|借记卡|护照|证件|卡)(?:号|号码|编号)?|工号|学号|证号)\s*[:：#]?\s*[A-Za-z0-9-]{6,24}/g,
+    /((?:身份证|学生证|工作证|工卡|校园卡|一卡通|饭卡|银行卡|信用卡|借记卡|护照|证件|卡)(?:号|号码|编号)?|工号|学号|证号)\s*(?:[:：#]|为|是)?\s*[A-Za-z0-9-]{6,24}/g,
     (match, label) => `${label} [编号已隐藏]`,
     '编号已隐藏',
     reasons
   );
+  if (maskNames) {
+    text = replaceSensitivePattern(
+      text,
+      /((?:持卡人|姓名|名字|姓名信息))\s*(?:[:：#]|为|是)?\s*[\u4e00-\u9fa5]{2,4}/g,
+      (match, label) => `${label} [姓名已隐藏]`,
+      '姓名已隐藏',
+      reasons
+    );
+  }
   text = replaceSensitivePattern(
     text,
     /(?:\d[\s-]?){12,19}/g,
