@@ -1415,7 +1415,7 @@ async function notifyOwnerClaimReviewRequested(item = {}, request = {}) {
     `模型判断：${modelReason}`,
     '',
     '请回到 LockMyItem 的物品详情，在“待确认认领”中选择通过或拒绝。',
-    '如需使用卡号、证件号、手机号等敏感信息核验，请让对方通过 LockMyItem 认领表单提交，系统会脱敏处理。'
+    '请避免在评论或邮件里直接交流个人敏感信息；如需进一步核验，请让对方回到 LockMyItem 认领表单补充。'
   ].join('\n');
   const html = `
     <p>你好，${escapeHtml(userDisplayName(ownerUser))}：</p>
@@ -1428,7 +1428,7 @@ async function notifyOwnerClaimReviewRequested(item = {}, request = {}) {
       <li>模型判断：${escapeHtml(modelReason)}</li>
     </ul>
     <p>请回到 LockMyItem 的物品详情，在“待确认认领”中选择通过或拒绝。</p>
-    <p>如需使用卡号、证件号、手机号等敏感信息核验，请让对方通过 LockMyItem 认领表单提交，系统会脱敏处理。</p>
+    <p>请避免在评论或邮件里直接交流个人敏感信息；如需进一步核验，请让对方回到 LockMyItem 认领表单补充。</p>
   `;
 
   await sendTransactionalEmail({ to: ownerEmail, subject, text, html });
@@ -1714,13 +1714,13 @@ function validateClaimDescriptionQuality(description = '') {
   const alphaChineseCount = (meaningfulText.match(/[A-Za-z\u4e00-\u9fa5]/g) || []).length;
 
   if (!hasLetterOrChinese || alphaChineseCount < 2) {
-    return '请描述颜色、外观、卡套、标志、姓名、卡号或其他可核验特征，不能只输入无意义数字';
+    return '请描述颜色、外观、卡套、标志或使用痕迹等可核验特征，不能只输入无意义数字';
   }
   if (meaningfulText.length >= 6 && distinctChars <= 2) {
     return '请补充更具体的物品特征，不能只输入重复字符';
   }
   if (digitCount > 0 && alphaChineseCount < 4) {
-    return '请不要只用编号认领，请补充卡面类别、学校、姓名、颜色或卡套等特征';
+    return '请不要只用编号认领，请补充卡面类别、学校标识、颜色、卡套或使用痕迹等非敏感特征';
   }
   if (chineseCount === 0 && latinWordCount < 2 && alphaChineseCount < 6) {
     return '请补充更具体的物品特征';

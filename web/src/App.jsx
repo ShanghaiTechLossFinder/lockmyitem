@@ -1292,7 +1292,7 @@ function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, 
     );
     if (masked) {
       setForm(safeForm);
-      setPrivacyNotice('已自动处理卡号、证件号或手机号等敏感信息');
+      setPrivacyNotice('已自动处理个人敏感信息');
     }
     setSubmitting(true);
     try {
@@ -2069,11 +2069,11 @@ function DetailPage({ item, items, comments = [], claimRequests = [], onBack, cl
         <form className="claim-verify-card" onSubmit={submitClaimDescription}>
           <span className="section-kicker">认领前确认</span>
           <strong>请先描述物品特征</strong>
-          <p>可以填写卡号、姓名、学号等可核验信息；系统仅用于后端匹配并脱敏处理，不会公开展示。也可描述颜色、外观、卡套或使用痕迹。</p>
+          <p>请优先描述颜色、外观、卡套、标志或使用痕迹。不要在页面示例或评论中展示个人敏感信息。</p>
           <textarea
             className="field textarea"
             value={claimDescription}
-            placeholder="例如：蓝色卡套；张同学；或卡号尾号/完整卡面编号"
+            placeholder="例如：蓝色卡套；背面有圆形贴纸；边角有磨损"
             onChange={(event) => setClaimDescription(event.target.value)}
           />
           {claimVerifyMessage && <div className="privacy-notice">{claimVerifyMessage}</div>}
