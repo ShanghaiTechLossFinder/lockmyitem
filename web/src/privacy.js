@@ -1,15 +1,8 @@
-const SENSITIVE_CATEGORIES = ['证件', '钥匙', '校园卡'];
-const IMPORTANT_CATEGORIES = ['电子产品'];
+const SENSITIVE_CATEGORIES = ['证件'];
+const IMPORTANT_CATEGORIES = [];
 
 const SENSITIVE_WORDS = [
-  '钱包',
-  '工卡',
-  '工作证',
   '身份证',
-  '学生证',
-  '校园卡',
-  '一卡通',
-  '饭卡',
   '护照',
   '银行卡',
   '信用卡',
@@ -17,12 +10,22 @@ const SENSITIVE_WORDS = [
   '医保卡',
   '社保卡',
   '驾驶证',
-  '证件',
-  '门禁卡',
-  '卡包'
+  '证件'
 ];
 
-const IMPORTANT_WORDS = ['手机', '电脑', '笔记本', '平板', '耳机', '相机', '手表', '电子产品'];
+const IMPORTANT_WORDS = [];
+const PROTECTED_VISUAL_WORDS = [
+  '银行卡',
+  '信用卡',
+  '借记卡',
+  '医保卡',
+  '社保卡',
+  '证件',
+  '储蓄卡',
+  '身份证',
+  '护照',
+  '驾驶证'
+];
 
 function unique(values = []) {
   return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
@@ -96,8 +99,13 @@ export function maskSensitiveText(value = '') {
 }
 
 function hasSensitiveWord(text = '') {
-  if (SENSITIVE_WORDS.some((word) => text.includes(word))) return true;
-  return /钥匙(?!扣)/.test(text);
+  return SENSITIVE_WORDS.some((word) => text.includes(word));
+}
+
+function hasProtectedVisualSurface(item = {}) {
+  if (!isFoundItem(item)) return false;
+  const text = sourceText(item);
+  return PROTECTED_VISUAL_WORDS.some((word) => text.includes(word));
 }
 
 function sensitivityForItem(item = {}, maskReasons = []) {
@@ -125,7 +133,8 @@ export function sanitizeFoundItemPrivacy(item = {}) {
   const title = maskSensitiveText(item.title);
   const description = maskSensitiveText(item.description);
   const visualDescription = maskSensitiveText(item.visualDescription);
-  const maskReasons = unique([...title.reasons, ...description.reasons, ...visualDescription.reasons]);
+  const persistedMaskReasons = (item.sensitivityReasons || []).filter((reason) => String(reason || '').includes('隐藏'));
+  const maskReasons = unique([...title.reasons, ...description.reasons, ...visualDescription.reasons, ...persistedMaskReasons]);
   const sensitivity = sensitivityForItem(item, maskReasons);
 
   return {
@@ -133,15 +142,13 @@ export function sanitizeFoundItemPrivacy(item = {}) {
     title: title.text,
     description: description.text,
     visualDescription: visualDescription.text,
-    sensitivityLevel: item.sensitivityLevel === 'sensitive' ? 'sensitive' : sensitivity.level,
-    sensitivityReasons: unique([...(item.sensitivityReasons || []), ...sensitivity.reasons])
+    sensitivityLevel: sensitivity.level,
+    sensitivityReasons: sensitivity.reasons
   };
 }
 
 export function isProtectedFoundItem(item = {}) {
-  if (!isFoundItem(item)) return false;
-  const level = sanitizeFoundItemPrivacy(item).sensitivityLevel;
-  return level === 'important' || level === 'sensitive';
+  return hasProtectedVisualSurface(item);
 }
 
 export function privacyPromptLines(itemType = '') {

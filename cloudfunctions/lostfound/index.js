@@ -92,7 +92,7 @@ const CLAIM_CONFIG = {
   tokenTtlMs: positiveNumber(process.env.CLAIM_TOKEN_TTL_MS, 10 * 60 * 1000),
   minDescriptionLength: positiveNumber(process.env.CLAIM_DESCRIPTION_MIN_LENGTH, 8),
   maxDescriptionLength: positiveNumber(process.env.CLAIM_DESCRIPTION_MAX_LENGTH, 260),
-  minModelConfidence: positiveNumber(process.env.CLAIM_MODEL_MIN_CONFIDENCE, 0.68)
+  minModelConfidence: positiveNumber(process.env.CLAIM_MODEL_MIN_CONFIDENCE, 0.55)
 };
 
 const classifyRateBuckets = new Map();
@@ -1401,11 +1401,11 @@ async function notifyOwnerClaimReviewRequested(item = {}, request = {}) {
   const location = itemLocationText(safeItem);
   const description = cleanClaimField(request.description, '未填写', CLAIM_CONFIG.maxDescriptionLength);
   const modelReason = cleanClaimField(request.modelDecision?.reason, '模型未能直接判断', 160);
-  const subject = `LockMyItem：重要物品「${title}」需要你确认认领`;
+  const subject = `LockMyItem：敏感卡面物品「${title}」需要你确认认领`;
   const text = [
     `你好，${userDisplayName(ownerUser)}：`,
     '',
-    `${claimantName} 提交了重要物品认领描述，模型未能直接判断，需要你人工确认。`,
+    `${claimantName} 提交了敏感卡面物品认领描述，模型未能直接判断，需要你人工确认。`,
     `招领物品：${title}`,
     `物品地点：${location}`,
     `认领人账号/邮箱：${claimantContact || '未提供'}`,
@@ -1417,7 +1417,7 @@ async function notifyOwnerClaimReviewRequested(item = {}, request = {}) {
   ].join('\n');
   const html = `
     <p>你好，${escapeHtml(userDisplayName(ownerUser))}：</p>
-    <p><strong>${escapeHtml(claimantName)}</strong> 提交了重要物品认领描述，模型未能直接判断，需要你人工确认。</p>
+    <p><strong>${escapeHtml(claimantName)}</strong> 提交了敏感卡面物品认领描述，模型未能直接判断，需要你人工确认。</p>
     <ul>
       <li>招领物品：${escapeHtml(title)}</li>
       <li>物品地点：${escapeHtml(location)}</li>
@@ -1463,7 +1463,7 @@ async function notifyLostOwnersAboutFoundMatch(foundItem = {}, finderUser = {}) 
     const foundTitle = safeFoundItem.title || '一件招领物品';
     const location = itemLocationText(safeFoundItem);
     const reasonText = match.reasons.length ? match.reasons.join('、') : '物品特征相似';
-    const claimNotice = isProtectedFoundItem(safeFoundItem) ? '重要物品需先描述特征，通过后才能查看图片确认。' : '';
+    const claimNotice = isProtectedFoundItem(safeFoundItem) ? '含敏感卡面或证件信息，需先描述非敏感特征，通过后才能查看图片确认。' : '';
     const subject = `LockMyItem：可能找到你的「${lostTitle}」`;
     const text = [
       `你好，${userDisplayName(lostOwner)}：`,
@@ -1542,7 +1542,7 @@ async function notifyLostOwnerAboutExistingFoundMatches(lostItem = {}, lostOwner
     const foundTitle = safeFoundItem.title || '一件招领物品';
     const location = itemLocationText(safeFoundItem);
     const reasonText = match.reasons.length ? match.reasons.join('、') : '物品特征相似';
-    const claimNotice = isProtectedFoundItem(safeFoundItem) ? '重要物品需先描述特征，通过后才能查看图片确认。' : '';
+    const claimNotice = isProtectedFoundItem(safeFoundItem) ? '含敏感卡面或证件信息，需先描述非敏感特征，通过后才能查看图片确认。' : '';
     const subject = `LockMyItem：可能找到你的「${lostTitle}」`;
     const text = [
       `你好，${userDisplayName(lostOwner)}：`,
@@ -1619,7 +1619,9 @@ function buildClaimVerificationPrompt(item = {}, description = '') {
     '任务：判断“认领人描述”是否与“招领物品公开信息”相符。',
     '只比较颜色、类别、外观、配件、挂件、材质、地点、使用痕迹等非敏感特征。',
     '不要要求、输出或复述完整卡号、身份证号、手机号、工号、学号、护照号或任何证件唯一编号。',
-    '如果描述过于笼统、只重复标题类别、或明显不匹配，应返回 uncertain 或 mismatch。',
+    '只要描述包含一个或多个可比对的非敏感特征，且没有明显矛盾，可以返回 match。',
+    '不要因为描述不完整、没有覆盖所有细节、或没有提供敏感编号而拒绝。',
+    '只有描述完全空泛、只表达“是我的”、或明显不匹配时，才返回 uncertain 或 mismatch。',
     '必须只返回 JSON，不要 Markdown，不要解释。',
     'JSON 字段：decision, confidence, reason。',
     'decision 只能是 match、uncertain、mismatch。',
@@ -1825,7 +1827,7 @@ async function verifyClaimDescription(event, context) {
   await createNotification(
     item.ownerOpenid,
     'claim_review',
-    `${request.claimantName} 提交了重要物品认领描述，等待你确认：${safeItem.title}`,
+    `${request.claimantName} 提交了敏感卡面物品认领描述，等待你确认：${safeItem.title}`,
     event.itemId,
     actor.actorId
   ).catch(() => null);
@@ -2174,7 +2176,7 @@ async function claimItem(event, context) {
     const tokenPayload = verifyClaimToken(event.claimToken, event.itemId, actor.actorId);
     const approvedRequest = tokenPayload ? null : await getApprovedClaimRequest(event.requestId, event.itemId, actor.actorId);
     if (!tokenPayload && !approvedRequest) {
-      return fail('重要物品需先提交特征描述，通过后才能认领', 'CLAIM_VERIFICATION_REQUIRED');
+      return fail('敏感卡面物品需先提交特征描述，通过后才能认领', 'CLAIM_VERIFICATION_REQUIRED');
     }
   }
 

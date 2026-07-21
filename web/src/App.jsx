@@ -2007,8 +2007,8 @@ function DetailPage({ item, items, comments = [], claimRequests = [], onBack, cl
       <div className={`detail-image ${imageLocked ? 'locked' : ''}`}>
         {imageLocked ? (
           <span className="protected-image-placeholder">
-            <strong>{item.category || '重要物品'}</strong>
-            <span>先描述物品特征，通过后查看图片确认</span>
+            <strong>{item.category || '敏感卡面'}</strong>
+            <span>先描述非敏感特征，通过后查看图片确认</span>
           </span>
         ) : (
           item.image ? <img src={item.image} alt="" /> : <span>{item.category}</span>
@@ -2063,7 +2063,7 @@ function DetailPage({ item, items, comments = [], claimRequests = [], onBack, cl
           <textarea
             className="field textarea"
             value={claimDescription}
-            placeholder="例如：黑色钱包，内有蓝色卡套；或钥匙上有红色圆形挂件"
+            placeholder="例如：蓝色卡套，背面有圆形贴纸；或证件外壳边角有磨损"
             onChange={(event) => setClaimDescription(event.target.value)}
           />
           {claimVerifyMessage && <div className="privacy-notice">{claimVerifyMessage}</div>}
