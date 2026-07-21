@@ -2065,8 +2065,9 @@ async function listItems(event) {
     .skip(filters.cursor || 0)
     .limit(filters.limit || 20)
     .get();
-  const items = (await hydrateItemImages(result.data))
+  const visibleItems = (result.data || [])
     .map((item) => sanitizeItemForViewer(item, event, actorId));
+  const items = await hydrateItemImages(visibleItems);
   return ok({ items, nextCursor: (filters.cursor || 0) + result.data.length });
 }
 
