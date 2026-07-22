@@ -51,6 +51,7 @@ const EMAIL_CODE_COOLDOWN_SECONDS = 30;
 const LOCATION_DETAIL_HINT = '可补充入口、楼层、靠窗/靠路侧、附近标志物等细节。';
 const VIEW_STORAGE_KEY = 'lockmyitem_web_last_view';
 const SAVED_VIEWS = ['found', 'lost', 'returned', 'me'];
+const CLAIM_ACCESS_STORAGE_PREFIX = 'lockmyitem_claim_access_v1';
 
 function loadSavedView() {
   if (typeof window === 'undefined') return 'found';
@@ -68,6 +69,88 @@ function saveCurrentView(view) {
     window.localStorage?.setItem(VIEW_STORAGE_KEY, view);
   } catch {
     // Ignore storage failures; navigation should still work.
+  }
+}
+
+function sessionStorageSafe() {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function claimAccessSubject(currentUser, currentClientId = '') {
+  return normalizedIdentity(
+    currentUser?.actorId
+    || currentUser?._openid
+    || currentUser?.openid
+    || currentUser?.id
+    || currentUser?.email
+    || currentUser?.contact
+    || currentClientId
+  ) || 'anonymous';
+}
+
+function claimAccessStorageKey(itemId, currentUser, currentClientId = '') {
+  return `${CLAIM_ACCESS_STORAGE_PREFIX}:${claimAccessSubject(currentUser, currentClientId)}:${encodeURIComponent(itemId || '')}`;
+}
+
+function readStoredClaimAccess(itemId, currentUser, currentClientId = '') {
+  const storage = sessionStorageSafe();
+  if (!storage || !itemId) return null;
+  const key = claimAccessStorageKey(itemId, currentUser, currentClientId);
+  try {
+    const parsed = JSON.parse(storage.getItem(key) || 'null');
+    if (!parsed?.claimToken || !parsed.expiresAt || Number(parsed.expiresAt) <= Date.now()) {
+      storage.removeItem(key);
+      return null;
+    }
+    return {
+      claimToken: parsed.claimToken,
+      expiresAt: Number(parsed.expiresAt),
+      verifiedAt: parsed.verifiedAt || ''
+    };
+  } catch {
+    storage.removeItem(key);
+    return null;
+  }
+}
+
+function writeStoredClaimAccess(itemId, currentUser, currentClientId = '', access = {}) {
+  const storage = sessionStorageSafe();
+  if (!storage || !itemId || !access.claimToken || !access.expiresAt) return;
+  try {
+    storage.setItem(claimAccessStorageKey(itemId, currentUser, currentClientId), JSON.stringify({
+      claimToken: access.claimToken,
+      expiresAt: access.expiresAt,
+      verifiedAt: access.verifiedAt || new Date().toISOString()
+    }));
+  } catch {
+    // Storage is only a refresh convenience; the server still validates tokens.
+  }
+}
+
+function clearStoredClaimAccess(itemId, currentUser, currentClientId = '') {
+  const storage = sessionStorageSafe();
+  if (!storage || !itemId) return;
+  try {
+    storage.removeItem(claimAccessStorageKey(itemId, currentUser, currentClientId));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function clearAllStoredClaimAccess() {
+  const storage = sessionStorageSafe();
+  if (!storage) return;
+  try {
+    Object.keys(storage)
+      .filter((key) => key.startsWith(`${CLAIM_ACCESS_STORAGE_PREFIX}:`))
+      .forEach((key) => storage.removeItem(key));
+  } catch {
+    // Ignore storage failures.
   }
 }
 
@@ -216,6 +299,7 @@ function App() {
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
   const [showPwaGuide, setShowPwaGuide] = useState(false);
   const viewRef = useRef(view);
+  const currentClientId = useMemo(() => getClientId(), []);
 
   useEffect(() => {
     saveItems(items);
@@ -260,6 +344,15 @@ function App() {
       .then(({ item, comments, claimRequests }) => {
         if (cancelled) return;
         if (item) {
+          if (claimToken && item.claimImageLocked) {
+            clearStoredClaimAccess(selectedId, currentUser, currentClientId);
+            setClaimAccessByItem((current) => {
+              if (!current[selectedId]) return current;
+              const next = { ...current };
+              delete next[selectedId];
+              return next;
+            });
+          }
           setItems((current) => (
             current.some((entry) => entry.id === item.id)
               ? current.map((entry) => (entry.id === item.id ? { ...entry, ...item } : entry))
@@ -280,7 +373,63 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [view, selectedId, claimAccessByItem]);
+  }, [view, selectedId, claimAccessByItem, currentUser, currentClientId]);
+
+  useEffect(() => {
+    const restored = {};
+    for (const item of items) {
+      if (!isProtectedFoundItem(item)) continue;
+      const access = readStoredClaimAccess(item.id, currentUser, currentClientId);
+      if (access) restored[item.id] = access;
+    }
+    if (Object.keys(restored).length === 0) return;
+    setClaimAccessByItem((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const [itemId, access] of Object.entries(restored)) {
+        if (next[itemId]?.claimToken === access.claimToken) continue;
+        next[itemId] = access;
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [items, currentUser, currentClientId]);
+
+  useEffect(() => {
+    const lockedItemsWithToken = items
+      .filter((item) => item.claimImageLocked && isProtectedFoundItem(item) && claimAccessByItem[item.id]?.claimToken)
+      .slice(0, 5);
+    if (lockedItemsWithToken.length === 0) return undefined;
+
+    let cancelled = false;
+    lockedItemsWithToken.forEach((item) => {
+      const claimToken = claimAccessByItem[item.id]?.claimToken || '';
+      loadCloudItemDetail(item.id, claimToken)
+        .then(({ item: detailItem, comments, claimRequests }) => {
+          if (cancelled || !detailItem) return;
+          if (detailItem.claimImageLocked) {
+            clearStoredClaimAccess(item.id, currentUser, currentClientId);
+            setClaimAccessByItem((current) => {
+              if (!current[item.id]) return current;
+              const next = { ...current };
+              delete next[item.id];
+              return next;
+            });
+            return;
+          }
+          setItems((current) => current.map((entry) => (entry.id === detailItem.id ? { ...entry, ...detailItem } : entry)));
+          setCommentsByItem((current) => ({ ...current, [item.id]: comments || current[item.id] || [] }));
+          setClaimRequestsByItem((current) => ({ ...current, [item.id]: claimRequests || current[item.id] || [] }));
+        })
+        .catch((error) => {
+          if (!cancelled) console.warn('Failed to restore claim access.', error);
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items, claimAccessByItem, currentUser, currentClientId]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -308,7 +457,6 @@ function App() {
     };
   }, []);
 
-  const currentClientId = useMemo(() => getClientId(), []);
   const stats = useMemo(() => getStatsFromItems(items), [items]);
   const myItems = useMemo(
     () => items.filter((item) => itemBelongsToCurrentUser(item, currentUser, currentClientId)),
@@ -485,6 +633,13 @@ function App() {
       try {
         const { item: claimedItem, comment } = await claimCloudItem(item.id, user, claimAccess);
         const nextItem = claimedItem || fallbackItem;
+        clearStoredClaimAccess(item.id, user, currentClientId);
+        setClaimAccessByItem((current) => {
+          if (!current[item.id]) return current;
+          const next = { ...current };
+          delete next[item.id];
+          return next;
+        });
         setItems((current) => current.map((entry) => (entry.id === item.id ? nextItem : entry)));
         if (comment) {
           setCommentsByItem((current) => ({
@@ -496,6 +651,15 @@ function App() {
       } catch (error) {
         const message = cloudErrorMessage(error);
         if (protectedClaim || /自己发布|FORBIDDEN|ALREADY_RETURNED|CLAIM_VERIFICATION_REQUIRED|已回家|重复认领|先提交特征描述/.test(message)) {
+          if (/CLAIM_VERIFICATION_REQUIRED|先提交特征描述/.test(message)) {
+            clearStoredClaimAccess(item.id, user, currentClientId);
+            setClaimAccessByItem((current) => {
+              if (!current[item.id]) return current;
+              const next = { ...current };
+              delete next[item.id];
+              return next;
+            });
+          }
           setToast(message);
           return;
         }
@@ -519,12 +683,16 @@ function App() {
       }
       const result = await verifyClaimDescription(item.id, description);
       if (result.status === 'verified' && result.claimToken) {
+        const expiresInSeconds = Number(result.expiresInSeconds) || 600;
+        const access = {
+          claimToken: result.claimToken,
+          expiresAt: Date.now() + expiresInSeconds * 1000,
+          verifiedAt: new Date().toISOString()
+        };
+        writeStoredClaimAccess(item.id, user, currentClientId, access);
         setClaimAccessByItem((current) => ({
           ...current,
-          [item.id]: {
-            claimToken: result.claimToken,
-            verifiedAt: new Date().toISOString()
-          }
+          [item.id]: access
         }));
         const detail = await loadCloudItemDetail(item.id, result.claimToken);
         if (detail.item) {
@@ -580,9 +748,17 @@ function App() {
     try {
       const result = await getCloudClaimRequestStatus(item.id, access.requestId);
       if (result.status === 'verified' && result.claimToken) {
+        const expiresInSeconds = Number(result.expiresInSeconds) || 600;
+        const tokenAccess = {
+          ...access,
+          claimToken: result.claimToken,
+          expiresAt: Date.now() + expiresInSeconds * 1000,
+          verifiedAt: new Date().toISOString()
+        };
+        writeStoredClaimAccess(item.id, currentUser, currentClientId, tokenAccess);
         setClaimAccessByItem((current) => ({
           ...current,
-          [item.id]: { ...current[item.id], claimToken: result.claimToken, verifiedAt: new Date().toISOString() }
+          [item.id]: { ...current[item.id], ...tokenAccess }
         }));
         const detail = await loadCloudItemDetail(item.id, result.claimToken);
         if (detail.item) {
@@ -591,6 +767,7 @@ function App() {
         setCommentsByItem((current) => ({ ...current, [item.id]: detail.comments || [] }));
         setToast('发布者已通过，请查看图片后确认认领');
       } else if (result.status === 'invalidated' || result.status === 'rejected') {
+        clearStoredClaimAccess(item.id, currentUser, currentClientId);
         setClaimAccessByItem((current) => {
           const next = { ...current };
           delete next[item.id];
@@ -664,6 +841,8 @@ function App() {
 
   function logout() {
     clearUser();
+    clearAllStoredClaimAccess();
+    setClaimAccessByItem({});
     setCurrentUser(null);
     setToast('已退出登录');
   }
