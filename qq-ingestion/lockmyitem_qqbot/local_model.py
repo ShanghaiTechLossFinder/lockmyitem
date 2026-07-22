@@ -1,10 +1,14 @@
 import base64
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
 import re
+import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -117,24 +121,95 @@ def build_prompt(text: str, sent_at: str) -> str:
     ))
 
 
+def _sha256_hex(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def build_tencent_authorization(
+    secret_id: str,
+    secret_key: str,
+    host: str,
+    action: str,
+    service: str,
+    payload: bytes,
+    timestamp: int,
+) -> str:
+    algorithm = "TC3-HMAC-SHA256"
+    date = datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y-%m-%d")
+    canonical_headers = "\n".join((
+        "content-type:application/json; charset=utf-8",
+        f"host:{host}",
+        f"x-tc-action:{action.lower()}",
+        "",
+    ))
+    signed_headers = "content-type;host;x-tc-action"
+    canonical_request = "\n".join((
+        "POST",
+        "/",
+        "",
+        canonical_headers,
+        signed_headers,
+        _sha256_hex(payload),
+    ))
+    credential_scope = f"{date}/{service}/tc3_request"
+    string_to_sign = "\n".join((
+        algorithm,
+        str(timestamp),
+        credential_scope,
+        _sha256_hex(canonical_request.encode("utf-8")),
+    ))
+    secret_date = hmac.new(f"TC3{secret_key}".encode("utf-8"), date.encode("utf-8"), hashlib.sha256).digest()
+    secret_service = hmac.new(secret_date, service.encode("utf-8"), hashlib.sha256).digest()
+    secret_signing = hmac.new(secret_service, b"tc3_request", hashlib.sha256).digest()
+    signature = hmac.new(secret_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    return (
+        f"{algorithm} Credential={secret_id}/{credential_scope}, "
+        f"SignedHeaders={signed_headers}, Signature={signature}"
+    )
+
+
 class HunyuanLocalClient:
-    def __init__(self, api_key: str | None = None, base_url: str | None = None, model: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        secret_id: str | None = None,
+        secret_key: str | None = None,
+    ):
         self.api_key = (api_key or os.getenv("HUNYUAN_API_KEY", "")).strip()
-        if not self.api_key:
-            raise RuntimeError("缺少 HUNYUAN_API_KEY；请写入本地 .env，不要提交到 Git")
+        self.secret_id = (secret_id or os.getenv("TENCENTCLOUD_SECRET_ID", "") or os.getenv("TENCENT_SECRET_ID", "")).strip()
+        self.secret_key = (secret_key or os.getenv("TENCENTCLOUD_SECRET_KEY", "") or os.getenv("TENCENT_SECRET_KEY", "")).strip()
+        if bool(self.secret_id) != bool(self.secret_key):
+            raise RuntimeError("腾讯云 CAM 凭据必须同时配置 SecretId 和 SecretKey")
+        if not self.api_key and not (self.secret_id and self.secret_key):
+            raise RuntimeError("缺少混元凭据；请在本地 .env 配置 API Key 或 CAM 密钥对，不要提交到 Git")
         self.base_url = (base_url or os.getenv("HUNYUAN_BASE_URL", "https://api.hunyuan.cloud.tencent.com/v1")).rstrip("/")
         if urlparse(self.base_url).scheme != "https":
             raise RuntimeError("HUNYUAN_BASE_URL 必须使用 HTTPS，避免 API 密钥明文传输")
         self.model = (model or os.getenv("HUNYUAN_MODEL", "hunyuan-vision")).strip()
+        self.tencent_endpoint = os.getenv("TENCENT_HUNYUAN_ENDPOINT", "https://hunyuan.tencentcloudapi.com").rstrip("/")
+        parsed_endpoint = urlparse(self.tencent_endpoint)
+        if parsed_endpoint.scheme != "https" or not parsed_endpoint.hostname:
+            raise RuntimeError("TENCENT_HUNYUAN_ENDPOINT 必须是 HTTPS 地址")
+        self.tencent_host = parsed_endpoint.netloc
+        self.tencent_action = "ChatCompletions"
+        self.tencent_version = "2023-09-01"
+        self.tencent_service = "hunyuan"
+        self.tencent_region = (os.getenv("TENCENTCLOUD_REGION", "") or os.getenv("TENCENT_REGION", "")).strip()
+        self.credential_mode = "tencent_cam" if self.secret_id and self.secret_key else "api_key"
 
     def analyze(self, text: str, sent_at: str, image_paths: list[Path]) -> dict[str, Any]:
         max_bytes = int(os.getenv("HUNYUAN_MAX_BATCH_IMAGE_BYTES", str(8 * 1024 * 1024)))
         if sum(path.stat().st_size for path in image_paths[:6]) > max_bytes:
             raise RuntimeError("图片批次超过 HUNYUAN_MAX_BATCH_IMAGE_BYTES，请拆分或压缩后重试")
-        content = [
-            {"type": "image_url", "image_url": {"url": image_data_url(path)}}
-            for path in image_paths[:6]
-        ]
+        image_urls = [image_data_url(path) for path in image_paths[:6]]
+        if self.credential_mode == "tencent_cam":
+            return self._analyze_tencent(text, sent_at, image_urls)
+        return self._analyze_api_key(text, sent_at, image_urls)
+
+    def _analyze_api_key(self, text: str, sent_at: str, image_urls: list[str]) -> dict[str, Any]:
+        content = [{"type": "image_url", "image_url": {"url": url}} for url in image_urls]
         content.append({"type": "text", "text": build_prompt(text, sent_at)})
         body = json.dumps({
             "model": self.model,
@@ -157,3 +232,48 @@ class HunyuanLocalClient:
         if not choices:
             raise RuntimeError("混元响应缺少 choices")
         return normalize_analysis(parse_json_content(choices[0].get("message", {}).get("content")))
+
+    def _analyze_tencent(self, text: str, sent_at: str, image_urls: list[str]) -> dict[str, Any]:
+        contents = [{"Type": "text", "Text": build_prompt(text, sent_at)}]
+        contents.extend({"Type": "image_url", "ImageUrl": {"Url": url}} for url in image_urls)
+        body = json.dumps({
+            "Model": self.model,
+            "Stream": False,
+            "Temperature": 0.1,
+            "Messages": [{"Role": "user", "Contents": contents}],
+        }, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        timestamp = int(time.time())
+        headers = {
+            "Authorization": build_tencent_authorization(
+                self.secret_id,
+                self.secret_key,
+                self.tencent_host,
+                self.tencent_action,
+                self.tencent_service,
+                body,
+                timestamp,
+            ),
+            "Content-Type": "application/json; charset=utf-8",
+            "Host": self.tencent_host,
+            "X-TC-Action": self.tencent_action,
+            "X-TC-Timestamp": str(timestamp),
+            "X-TC-Version": self.tencent_version,
+        }
+        if self.tencent_region:
+            headers["X-TC-Region"] = self.tencent_region
+        request = urllib.request.Request(self.tencent_endpoint, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=40) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            detail = error.read(500).decode("utf-8", errors="replace")
+            raise RuntimeError(f"混元 CAM 请求失败 HTTP {error.code}: {detail}") from error
+        result = data.get("Response") or {}
+        if result.get("Error"):
+            error = result["Error"]
+            raise RuntimeError(f"混元 CAM 请求失败 {error.get('Code', '')}: {error.get('Message', '')}")
+        choices = result.get("Choices") or []
+        if not choices:
+            raise RuntimeError("混元 CAM 响应缺少 Choices")
+        content = (choices[0].get("Message") or {}).get("Content")
+        return normalize_analysis(parse_json_content(content))

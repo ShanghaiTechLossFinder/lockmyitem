@@ -58,10 +58,24 @@ class ConfigValidationTest(unittest.TestCase):
         errors = [entry for entry in validate_config(environment, "listener") if entry["level"] == "error"]
         self.assertEqual(errors, [])
 
-    def test_local_scope_only_requires_hunyuan_api(self):
+    def test_local_scope_accepts_hunyuan_api_key(self):
         environment = {"HUNYUAN_API_KEY": "local-key"}
         errors = [entry for entry in validate_config(environment, "local") if entry["level"] == "error"]
         self.assertEqual(errors, [])
+
+    def test_local_scope_accepts_complete_cam_pair_and_rejects_partial_pair(self):
+        complete = {
+            "TENCENTCLOUD_SECRET_ID": "secret-id",
+            "TENCENTCLOUD_SECRET_KEY": "secret-key",
+        }
+        self.assertEqual(
+            [entry for entry in validate_config(complete, "local") if entry["level"] == "error"],
+            [],
+        )
+        issues = validate_config({"TENCENTCLOUD_SECRET_ID": "secret-id"}, "local")
+        names = {entry["name"] for entry in issues if entry["level"] == "error"}
+        self.assertIn("TENCENTCLOUD_CREDENTIALS", names)
+        self.assertIn("HUNYUAN_CREDENTIALS", names)
 
     def test_rejects_shared_secrets_bad_urls_and_inverted_thresholds(self):
         shared = "x" * 32

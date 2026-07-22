@@ -22,6 +22,11 @@ def _required(name: str) -> str:
     return value
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name, "true" if default else "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def canonical_payload(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -73,7 +78,8 @@ class LockMyItemIngestClient:
         self.max_batch_image_bytes = int(os.getenv("QQ_MAX_BATCH_IMAGE_BYTES", str(3_500_000)))
         self.post_max_attempts = max(1, int(os.getenv("QQ_POST_MAX_ATTEMPTS", "5")))
         self.post_retry_base_seconds = max(0.1, float(os.getenv("QQ_POST_RETRY_BASE_SECONDS", "1")))
-        self.reply_callback = reply_callback
+        self.send_replies = _env_flag("QQ_SEND_REPLIES", False)
+        self.reply_callback = reply_callback if self.send_replies else None
         default_spool_path = Path(__file__).resolve().parents[1] / "data" / "qq-ingestion-spool.sqlite3"
         spool_path = os.getenv("QQ_SPOOL_PATH", "").strip() or str(default_spool_path)
         self.spool = DurableSpool(spool_path)
@@ -113,6 +119,7 @@ class LockMyItemIngestClient:
             "text": "\n".join(message.text.strip() for message in messages if message.text.strip()),
             "images": images,
             "sentAt": first.sent_at,
+            "replyEnabled": self.send_replies,
         }
         batch_id, inserted = await asyncio.to_thread(self.spool.enqueue, payload)
         if inserted:

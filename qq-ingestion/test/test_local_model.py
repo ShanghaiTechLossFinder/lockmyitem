@@ -1,6 +1,15 @@
+import os
 import unittest
+from unittest.mock import patch
 
-from lockmyitem_qqbot.local_model import mask_sensitive_text, normalize_analysis, parse_json_content, route_analysis
+from lockmyitem_qqbot.local_model import (
+    HunyuanLocalClient,
+    build_tencent_authorization,
+    mask_sensitive_text,
+    normalize_analysis,
+    parse_json_content,
+    route_analysis,
+)
 
 
 class LocalModelPolicyTest(unittest.TestCase):
@@ -30,6 +39,28 @@ class LocalModelPolicyTest(unittest.TestCase):
         self.assertEqual(route_analysis(normal, "manifest"), "publish_candidate")
         self.assertEqual(route_analysis(normal, "loose_images"), "needs_review")
         self.assertEqual(mask_sensitive_text("手机号 13900000000"), "手机号")
+
+    def test_tc3_authorization_is_deterministic_and_binds_payload(self):
+        arguments = ("AKIDEXAMPLE", "secret", "hunyuan.tencentcloudapi.com", "ChatCompletions", "hunyuan")
+        first = build_tencent_authorization(*arguments, b'{"Model":"demo"}', 1784685600)
+        second = build_tencent_authorization(*arguments, b'{"Model":"demo"}', 1784685600)
+        changed = build_tencent_authorization(*arguments, b'{"Model":"other"}', 1784685600)
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, changed)
+        self.assertIn("Credential=AKIDEXAMPLE/2026-07-22/hunyuan/tc3_request", first)
+        self.assertIn("SignedHeaders=content-type;host;x-tc-action", first)
+
+    def test_local_client_prefers_complete_cam_pair_and_rejects_partial_pair(self):
+        environment = {
+            "HUNYUAN_API_KEY": "compatible-key",
+            "TENCENTCLOUD_SECRET_ID": "secret-id",
+            "TENCENTCLOUD_SECRET_KEY": "secret-key",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            self.assertEqual(HunyuanLocalClient().credential_mode, "tencent_cam")
+        with patch.dict(os.environ, {"TENCENTCLOUD_SECRET_ID": "secret-id"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "SecretId.*SecretKey"):
+                HunyuanLocalClient()
 
 
 if __name__ == "__main__":

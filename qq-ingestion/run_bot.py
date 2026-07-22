@@ -18,7 +18,8 @@ class LockMyItemQQBot(botpy.Client):
         if self.ingest.backend_configured and (not getattr(self, "outbox_task", None) or self.outbox_task.done()):
             self.outbox_task = asyncio.create_task(self.deliver_outbox())
         mode = "backend delivery" if self.ingest.backend_configured else "local queue only"
-        print(f"LockMyItem QQ bot is ready ({mode})")
+        reply_mode = "replies enabled" if self.ingest.send_replies else "ingestion only; replies disabled"
+        print(f"LockMyItem QQ bot is ready ({mode}; {reply_mode})")
 
     async def _accept_group_message(self, message: GroupMessage):
         author = getattr(message, "author", None)
@@ -36,6 +37,10 @@ class LockMyItemQQBot(botpy.Client):
     async def on_group_at_message_create(self, message: GroupMessage):
         await self._accept_group_message(message)
 
+    async def on_group_message_create(self, message: GroupMessage):
+        """Receive full group events when QQ Open Platform grants this subscription."""
+        await self._accept_group_message(message)
+
     async def reply_to_group(self, message: IncomingMessage, content: str):
         await self.api.post_group_message(
             group_openid=message.group_id,
@@ -48,6 +53,9 @@ class LockMyItemQQBot(botpy.Client):
         while True:
             try:
                 await self.ingest.deliver_pending()
+                if not self.ingest.send_replies:
+                    await asyncio.sleep(10)
+                    continue
                 messages = await asyncio.to_thread(self.ingest.pull_outbox)
                 for entry in messages:
                     try:

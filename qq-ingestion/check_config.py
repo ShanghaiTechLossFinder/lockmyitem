@@ -61,6 +61,8 @@ def validate_config(environment: dict[str, str], scope: str = "all") -> list[dic
         suffixes = [entry.strip() for entry in (value("QQ_IMAGE_HOST_SUFFIXES") or "qpic.cn,qq.com,gtimg.cn").split(",")]
         if any(not suffix or "*" in suffix or "://" in suffix or "/" in suffix for suffix in suffixes):
             error("QQ_IMAGE_HOST_SUFFIXES", "must contain comma-separated hostname suffixes without wildcards")
+        if value("QQ_SEND_REPLIES").lower() not in {"", "0", "1", "true", "false", "yes", "no", "on", "off"}:
+            error("QQ_SEND_REPLIES", "must be true or false")
 
     if scope in {"cloud", "all"}:
         token_secret = value("AUTH_TOKEN_SECRET") or value("LOCKMYITEM_AUTH_SECRET")
@@ -76,6 +78,8 @@ def validate_config(environment: dict[str, str], scope: str = "all") -> list[dic
         api_key = value("HUNYUAN_API_KEY") or value("TENCENTCLOUD_API_KEY") or value("TENCENT_HUNYUAN_API_KEY") or value("MODEL_API_KEY")
         secret_id = value("TENCENTCLOUD_SECRET_ID") or value("TENCENT_SECRET_ID")
         secret_key = value("TENCENTCLOUD_SECRET_KEY") or value("TENCENT_SECRET_KEY")
+        if bool(secret_id) != bool(secret_key):
+            error("TENCENTCLOUD_CREDENTIALS", "SecretId and SecretKey must be configured together")
         if not api_key and not (secret_id and secret_key):
             error("HUNYUAN_CREDENTIALS", "configure an API key or Tencent Cloud SecretId + SecretKey")
 
@@ -115,10 +119,19 @@ def validate_config(environment: dict[str, str], scope: str = "all") -> list[dic
             warning("SMTP_FROM", "not set; SMTP_USER will be used as sender")
 
     if scope == "local":
-        require("HUNYUAN_API_KEY")
+        api_key = value("HUNYUAN_API_KEY")
+        secret_id = value("TENCENTCLOUD_SECRET_ID") or value("TENCENT_SECRET_ID")
+        secret_key = value("TENCENTCLOUD_SECRET_KEY") or value("TENCENT_SECRET_KEY")
+        if bool(secret_id) != bool(secret_key):
+            error("TENCENTCLOUD_CREDENTIALS", "SecretId and SecretKey must be configured together")
+        if not api_key and not (secret_id and secret_key):
+            error("HUNYUAN_CREDENTIALS", "configure HUNYUAN_API_KEY or Tencent Cloud SecretId + SecretKey")
         base_url = value("HUNYUAN_BASE_URL") or "https://api.hunyuan.cloud.tencent.com/v1"
         if not _is_https(base_url):
             error("HUNYUAN_BASE_URL", "must use HTTPS")
+        endpoint = value("TENCENT_HUNYUAN_ENDPOINT") or "https://hunyuan.tencentcloudapi.com"
+        if not _is_https(endpoint):
+            error("TENCENT_HUNYUAN_ENDPOINT", "must use HTTPS")
 
     return issues
 

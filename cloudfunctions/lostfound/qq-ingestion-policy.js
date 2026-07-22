@@ -126,6 +126,10 @@ function qqReplyMessageId(messageId, replyUntilMs, currentTimeMs = Date.now()) {
   return messageId && Number(replyUntilMs) > Number(currentTimeMs) ? String(messageId) : '';
 }
 
+function shouldQueueQQReply(source = {}) {
+  return source.replyEnabled === true;
+}
+
 module.exports = {
   applyQQReviewCorrections,
   applyQQRouteGuards,
@@ -136,5 +140,6 @@ module.exports = {
   resolveQQReviewOwner,
   qqSignatureMessage,
   routeQQExtraction,
+  shouldQueueQQReply,
   stableJson
 };

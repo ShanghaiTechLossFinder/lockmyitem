@@ -25,7 +25,8 @@ const {
   qqReplyMessageId,
   resolveQQReviewOwner,
   qqSignatureMessage,
-  routeQQExtraction
+  routeQQExtraction,
+  shouldQueueQQReply
 } = require('./qq-ingestion-policy');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
@@ -2793,6 +2794,7 @@ async function ingestQQBatch(event) {
     messageIds,
     senderHash: sha256(String(payload.senderId)),
     sentAt: String(payload.sentAt || ''),
+    replyEnabled: payload.replyEnabled === true,
     ingestedAtMs: Date.now()
   };
   if (payload.importMode === 'loose_images') {
@@ -2834,19 +2836,28 @@ async function ingestQQBatch(event) {
     await db.collection(COLLECTIONS.items).doc(itemId).set({ data: itemData });
     const itemUrl = QQ_INGEST_CONFIG.publicBaseUrl ? `${QQ_INGEST_CONFIG.publicBaseUrl}/?item=${encodeURIComponent(itemId)}` : '';
     const replyText = `已录入 LockMyItem${itemUrl ? `：${itemUrl}` : ''}`;
-    await db.collection(COLLECTIONS.qqOutbox).doc(`qqo_${batchId.slice(0, 28)}`).set({
-      data: {
-        status: 'pending',
-        groupId,
-        messageId: messageIds[0],
-        replyUntilMs: qqReplyDeadlineMs(source.sentAt),
-        content: replyText,
-        attempts: 0,
-        createdAt: now(),
-        updatedAt: now()
-      }
-    });
-    result = { status: 'published', itemId, itemUrl, replyText, replyQueued: true };
+    const replyQueued = shouldQueueQQReply(source);
+    if (replyQueued) {
+      await db.collection(COLLECTIONS.qqOutbox).doc(`qqo_${batchId.slice(0, 28)}`).set({
+        data: {
+          status: 'pending',
+          groupId,
+          messageId: messageIds[0],
+          replyUntilMs: qqReplyDeadlineMs(source.sentAt),
+          content: replyText,
+          attempts: 0,
+          createdAt: now(),
+          updatedAt: now()
+        }
+      });
+    }
+    result = {
+      status: 'published',
+      itemId,
+      itemUrl,
+      replyText: replyQueued ? replyText : '',
+      replyQueued
+    };
   } else if (route === 'needs_review') {
     const draftId = `qqd_${batchId.slice(0, 28)}`;
     await db.collection(COLLECTIONS.qqDrafts).doc(draftId).set({
@@ -2984,7 +2995,7 @@ async function reviewQQDraft(event) {
       return { error: fail('QQ 草稿已处理', 'QQ_DRAFT_ALREADY_REVIEWED') };
     }
     await transaction.collection(COLLECTIONS.items).doc(itemId).set({ data: itemData });
-    if (draft.source?.groupId && draft.source?.messageId) {
+    if (draft.source?.groupId && draft.source?.messageId && shouldQueueQQReply(draft.source)) {
       await transaction.collection(COLLECTIONS.qqOutbox).doc(`qqoa_${sha256(draftId).slice(0, 27)}`).set({
         data: {
           status: 'pending',
@@ -3004,7 +3015,14 @@ async function reviewQQDraft(event) {
     return { approved: true };
   });
   if (approval.error) return approval.error;
-  return ok({ status: 'published', draftId, itemId, itemUrl, replyText });
+  return ok({
+    status: 'published',
+    draftId,
+    itemId,
+    itemUrl,
+    replyText: shouldQueueQQReply(draft.source) ? replyText : '',
+    replyQueued: shouldQueueQQReply(draft.source)
+  });
 }
 
 async function pullQQOutbox(event) {

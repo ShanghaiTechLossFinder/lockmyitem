@@ -12,6 +12,7 @@ const {
   resolveQQReviewOwner,
   qqSignatureMessage,
   routeQQExtraction,
+  shouldQueueQQReply,
   stableJson
 } = require('../qq-ingestion-policy');
 
@@ -96,6 +97,12 @@ test('QQ review corrections only update approved fields and preserve sensitivity
 test('QQ extraction preserves model important level', () => {
   const value = normalizeQQExtraction({ title: '白色耳机', sensitivityLevel: 'important' });
   assert.equal(value.sensitivityLevel, 'important');
+});
+
+test('QQ ingestion is reply-free unless the source explicitly opts in', () => {
+  assert.equal(shouldQueueQQReply({}), false);
+  assert.equal(shouldQueueQQReply({ replyEnabled: false }), false);
+  assert.equal(shouldQueueQQReply({ replyEnabled: true }), true);
 });
 
 test('loose history images are always forced to administrator review', () => {

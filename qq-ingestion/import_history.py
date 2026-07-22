@@ -17,6 +17,7 @@ def data_url(path: Path) -> str:
 def materialize_batch(batch: dict, base_dir: Path) -> dict:
     payload = {key: value for key, value in batch.items() if key != "imagePaths"}
     payload["images"] = [data_url((base_dir / value).resolve()) for value in batch.get("imagePaths", [])]
+    payload["replyEnabled"] = False
     return payload
 
 
@@ -64,6 +65,7 @@ def import_loose_images(client: LockMyItemIngestClient | None, directory: Path, 
             "images": [data_url(image_path)],
             "sentAt": "",
             "importMode": "loose_images",
+            "replyEnabled": False,
         }
         result = client._post(payload)
         print(image_path.name, result.get("status"), result.get("draftId") or "")

@@ -124,6 +124,7 @@ class ClientRetryTest(unittest.IsolatedAsyncioTestCase):
             client._post = Mock(side_effect=[OSError("temporary-1"), OSError("temporary-2"), {"status": "needs_review"}])
             await client._flush([IncomingMessage("m1", "g1", "group", "u1", text="拾到耳机")])
             self.assertEqual(client._post.call_count, 3)
+            self.assertFalse(client._post.call_args.args[0]["replyEnabled"])
             self.assertEqual(client.spool.stats(), {"pending": 0, "processed": 1})
 
     async def test_listener_without_backend_keeps_batch_in_local_queue(self):
