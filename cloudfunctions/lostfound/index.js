@@ -1,6 +1,29 @@
 const cloud = require('wx-server-sdk');
 const crypto = require('crypto');
 const { isProtectedFoundItem, maskSensitiveText, privacyPromptLines, sanitizeFoundItemPrivacy } = require('./privacy');
+const {
+  CLAIM_REQUEST_STATUS,
+  canActorSeeClaimant,
+  canViewerSeeComment,
+  canCompleteActiveClaim,
+  evaluateFixedWindow,
+  evaluateOtpRecord,
+  isClaimTokenPayloadValid,
+  isApprovedToViewRequest,
+  redactInternalItemSource,
+  reviewStatusForDecision,
+  redactProtectedImages,
+  shouldNotifyOwner
+} = require('./security-policy');
+const {
+  applyQQReviewCorrections,
+  matchCampusLocation,
+  normalizeQQExtraction,
+  qqReplyDeadlineMs,
+  qqReplyMessageId,
+  qqSignatureMessage,
+  routeQQExtraction
+} = require('./qq-ingestion-policy');
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
@@ -17,7 +40,10 @@ const COLLECTIONS = {
   reports: 'reports',
   locations: 'campus_locations',
   emailCodes: 'email_login_codes',
-  rateLimits: 'classify_rate_limits'
+  rateLimits: 'classify_rate_limits',
+  qqEvents: 'qq_ingest_events',
+  qqDrafts: 'qq_ingest_drafts',
+  qqOutbox: 'qq_bot_outbox'
 };
 
 const CATEGORY_KEYWORDS = {
@@ -70,6 +96,9 @@ const AUTH_CONFIG = {
   codeTtlMs: positiveNumber(process.env.AUTH_CODE_TTL_MS, 10 * 60 * 1000),
   codeCooldownMs: positiveNumber(process.env.AUTH_CODE_COOLDOWN_MS, 30 * 1000),
   maxCodeAttempts: positiveNumber(process.env.AUTH_CODE_MAX_ATTEMPTS, 5),
+  maxCodesPerEmailWindow: positiveNumber(process.env.AUTH_CODE_EMAIL_RATE_MAX, 5),
+  maxCodesPerRequesterWindow: positiveNumber(process.env.AUTH_CODE_REQUESTER_RATE_MAX, 10),
+  codeRateWindowMs: positiveNumber(process.env.AUTH_CODE_RATE_WINDOW_MS, 60 * 60 * 1000),
   passwordIterations: positiveNumber(process.env.AUTH_PASSWORD_ITERATIONS, 120000),
   smtpHost: process.env.SMTP_HOST || '',
   smtpPort: positiveNumber(process.env.SMTP_PORT, 465),
@@ -88,7 +117,26 @@ const CLAIM_CONFIG = {
   tokenTtlMs: positiveNumber(process.env.CLAIM_TOKEN_TTL_MS, 10 * 60 * 1000),
   minDescriptionLength: positiveNumber(process.env.CLAIM_DESCRIPTION_MIN_LENGTH, 8),
   maxDescriptionLength: positiveNumber(process.env.CLAIM_DESCRIPTION_MAX_LENGTH, 260),
-  minModelConfidence: positiveNumber(process.env.CLAIM_MODEL_MIN_CONFIDENCE, 0.55)
+  minModelConfidence: positiveNumber(process.env.CLAIM_MODEL_MIN_CONFIDENCE, 0.55),
+  maxAttempts: positiveNumber(process.env.CLAIM_RATE_LIMIT_MAX, 5),
+  attemptWindowMs: positiveNumber(process.env.CLAIM_RATE_LIMIT_WINDOW_MS, 10 * 60 * 1000),
+  attemptCooldownMs: positiveNumber(process.env.CLAIM_RATE_LIMIT_COOLDOWN_MS, 15 * 1000),
+  maxUserAttempts: positiveNumber(process.env.CLAIM_USER_RATE_LIMIT_MAX, 20),
+  userAttemptWindowMs: positiveNumber(process.env.CLAIM_USER_RATE_LIMIT_WINDOW_MS, 60 * 60 * 1000),
+  userAttemptCooldownMs: positiveNumber(process.env.CLAIM_USER_RATE_LIMIT_COOLDOWN_MS, 3 * 1000),
+  ownerNotificationCooldownMs: positiveNumber(process.env.CLAIM_OWNER_NOTIFICATION_COOLDOWN_MS, 10 * 60 * 1000)
+};
+
+const QQ_INGEST_CONFIG = {
+  secret: process.env.QQ_INGEST_SECRET || '',
+  adminSecret: process.env.QQ_ADMIN_SECRET || '',
+  reviewOwnerActorId: process.env.QQ_REVIEW_OWNER_ACTOR_ID || '',
+  allowedGroupName: process.env.QQ_ALLOWED_GROUP_NAME || '上科大健忘者互助协会',
+  allowedGroupIds: new Set(String(process.env.QQ_ALLOWED_GROUP_IDS || '').split(',').map((value) => value.trim()).filter(Boolean)),
+  signatureTtlMs: positiveNumber(process.env.QQ_SIGNATURE_TTL_MS, 5 * 60 * 1000),
+  highConfidence: positiveNumber(process.env.QQ_AUTO_PUBLISH_CONFIDENCE, 0.8),
+  mediumConfidence: positiveNumber(process.env.QQ_REVIEW_CONFIDENCE, 0.45),
+  publicBaseUrl: String(process.env.WEB_PUBLIC_BASE_URL || '').replace(/\/$/, '')
 };
 
 const classifyRateBuckets = new Map();
@@ -98,6 +146,9 @@ let emailCodeCollectionReady = false;
 let emailCodeCollectionDisabled = false;
 let claimRequestCollectionReady = false;
 let claimRequestCollectionDisabled = false;
+let qqCollectionsReady = false;
+let qqCollectionsDisabled = false;
+let qqLocationCache = { expiresAtMs: 0, locations: [] };
 
 function optionalNumber(value) {
   const number = Number(value);
@@ -355,12 +406,15 @@ function parseDataImageUrl(value = '') {
   };
 }
 
-async function uploadItemDataImage(dataUrl, actorId = '') {
+async function uploadItemDataImage(dataUrl, actorId = '', stableNamespace = '') {
   const parsed = parseDataImageUrl(dataUrl);
   if (!parsed) return '';
   const safeActorId = sha256(actorId || 'anonymous').slice(0, 16);
-  const random = crypto.randomBytes(8).toString('hex');
-  const cloudPath = `lostfound/items/${safeActorId}/${Date.now()}-${random}.${parsed.extension}`;
+  const contentHash = crypto.createHash('sha256').update(parsed.buffer).digest('hex').slice(0, 32);
+  const fileName = stableNamespace
+    ? `${sha256(stableNamespace).slice(0, 24)}-${contentHash}`
+    : `${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+  const cloudPath = `lostfound/items/${safeActorId}/${fileName}.${parsed.extension}`;
   const result = await cloud.uploadFile({
     cloudPath,
     fileContent: parsed.buffer
@@ -368,7 +422,7 @@ async function uploadItemDataImage(dataUrl, actorId = '') {
   return result.fileID || result.fileId || '';
 }
 
-async function prepareItemImages(imageUrls = [], actorId = '') {
+async function prepareItemImages(imageUrls = [], actorId = '', stableNamespace = '') {
   const imageFileIds = [];
   const publicImageUrls = [];
   const sources = unique(imageUrls).slice(0, 6);
@@ -378,7 +432,7 @@ async function prepareItemImages(imageUrls = [], actorId = '') {
     if (!value) continue;
 
     if (isDataImageUrl(value)) {
-      const fileId = await uploadItemDataImage(value, actorId);
+      const fileId = await uploadItemDataImage(value, actorId, stableNamespace);
       if (fileId) imageFileIds.push(fileId);
       continue;
     }
@@ -510,6 +564,14 @@ function requireActorId(context = {}, event = {}) {
   return { actorId };
 }
 
+function requireVerifiedActor(event = {}) {
+  const tokenPayload = verifyAuthToken(event.authToken);
+  if (!tokenPayload || !tokenPayload.sub) {
+    return { error: fail('请先使用上科大邮箱登录', 'AUTH_REQUIRED') };
+  }
+  return { actorId: tokenPayload.sub, tokenPayload };
+}
+
 function checkClassifyRateLimit(event = {}, context = {}) {
   const nowMs = Date.now();
   pruneClassifyRateBuckets(nowMs);
@@ -595,6 +657,45 @@ async function checkPersistentClassifyRateLimit(event = {}, context = {}) {
     await doc.update({
       data: {
         count: _.inc(1),
+        updatedAt: now()
+      }
+    });
+    return null;
+  });
+}
+
+async function checkPersistentActionRateLimit({ namespace, identity, maxRequests, windowMs, minIntervalMs = 0, message = '请求过于频繁' }) {
+  const ready = await ensureRateLimitCollection();
+  const key = sha256(`${namespace}:${identity}`);
+  const nowMs = Date.now();
+
+  if (!ready) {
+    return fail('安全限流服务暂不可用，请稍后再试', 'RATE_LIMIT_STORE_UNAVAILABLE');
+  }
+
+  return db.runTransaction(async (transaction) => {
+    const doc = transaction.collection(COLLECTIONS.rateLimits).doc(key);
+    let current = null;
+    try {
+      const result = await doc.get();
+      current = result && result.data ? result.data : null;
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+
+    const decision = evaluateFixedWindow(current, {
+      nowMs,
+      maxRequests,
+      windowMs,
+      minIntervalMs
+    });
+    if (!decision.allowed) {
+      return fail(`${message}，请 ${decision.retryAfterSeconds} 秒后再试`, 'RATE_LIMITED');
+    }
+    await doc.set({
+      data: {
+        ...decision.next,
+        namespace,
         updatedAt: now()
       }
     });
@@ -748,9 +849,8 @@ function verifyAuthToken(token = '') {
   }
 }
 
-function canSeeClaimantInfo(event = {}) {
-  const tokenPayload = verifyAuthToken(event.authToken);
-  return Boolean(tokenPayload && tokenPayload.sub);
+function canSeeClaimantInfo(item = {}, actorId = '') {
+  return canActorSeeClaimant(item, actorId);
 }
 
 function createClaimToken(itemId, claimantOpenid) {
@@ -784,9 +884,7 @@ function verifyClaimToken(token = '', itemId = '', claimantOpenid = '') {
   if (!safeEqual(expected, parts[1])) return null;
   try {
     const payload = JSON.parse(base64UrlDecode(parts[0]));
-    if (payload.typ !== 'claim') return null;
-    if (payload.itemId !== itemId || payload.sub !== claimantOpenid) return null;
-    if (!payload.exp || Number(payload.exp) < Date.now()) return null;
+    if (!isClaimTokenPayloadValid(payload, { itemId, claimantOpenid, nowMs: Date.now() })) return null;
     return payload;
   } catch {
     return null;
@@ -829,16 +927,7 @@ function itemBelongsToActor(item = {}, actorId = '') {
 }
 
 function stripProtectedImages(item = {}) {
-  return {
-    ...item,
-    image: '',
-    imageUrls: [],
-    imageFileIds: [],
-    thumbUrl: '',
-    locationImages: [],
-    claimImageLocked: true,
-    claimProtected: true
-  };
+  return redactProtectedImages(item);
 }
 
 function stripInternalItemFields(item = {}) {
@@ -847,7 +936,7 @@ function stripInternalItemFields(item = {}) {
     claimImageResetReason,
     ...publicItem
   } = item;
-  return publicItem;
+  return redactInternalItemSource(publicItem);
 }
 
 function canViewProtectedImages(item = {}, event = {}, actorId = '') {
@@ -858,7 +947,7 @@ function canViewProtectedImages(item = {}, event = {}, actorId = '') {
 }
 
 function sanitizeItemForViewer(item = {}, event = {}, actorId = '') {
-  const safeItem = sanitizeFoundItemPrivacy(sanitizeClaimantInfo(item, canSeeClaimantInfo(event)));
+  const safeItem = sanitizeFoundItemPrivacy(sanitizeClaimantInfo(item, canSeeClaimantInfo(item, actorId)));
   if (!isProtectedFoundItem(safeItem)) {
     return stripInternalItemFields({ ...safeItem, claimProtected: false, claimImageLocked: false });
   }
@@ -879,13 +968,8 @@ function sanitizeClaimantInfo(item = {}, canSeeClaimant = false) {
   };
 }
 
-function isClaimantCommentContent(content = '') {
-  return /已认领|申请认领|领取人|领取者/.test(String(content || ''));
-}
-
 function sanitizeCommentsForViewer(comments = [], canSeeClaimant = false) {
-  if (canSeeClaimant) return comments;
-  return comments.filter((comment) => !isClaimantCommentContent(comment.content));
+  return comments.filter((comment) => canViewerSeeComment(comment, canSeeClaimant));
 }
 
 function formatUtcDate(timestamp) {
@@ -956,9 +1040,14 @@ function buildVisionPrompt(hint = '', purpose = 'item', itemType = '') {
   ].join('\n');
 }
 
-async function callOpenAICompatibleHunyuanVisionJson({ imageUrl, prompt, temperature = 0.2 }) {
+function normalizeModelImageUrls(imageUrl = '', imageUrls = []) {
+  return unique([...(Array.isArray(imageUrls) ? imageUrls : []), imageUrl]).filter(Boolean).slice(0, 6);
+}
+
+async function callOpenAICompatibleHunyuanVisionJson({ imageUrl, imageUrls = [], prompt, temperature = 0.2 }) {
   const fetchClient = getFetch();
   const endpoint = `${HUNYUAN_CONFIG.baseUrl}/chat/completions`;
+  const modelImages = normalizeModelImageUrls(imageUrl, imageUrls);
 
   const response = await fetchClient(endpoint, {
     method: 'POST',
@@ -972,7 +1061,7 @@ async function callOpenAICompatibleHunyuanVisionJson({ imageUrl, prompt, tempera
         {
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: imageUrl } },
+            ...modelImages.map((url) => ({ type: 'image_url', image_url: { url } })),
             { type: 'text', text: prompt }
           ]
         }
@@ -991,9 +1080,10 @@ async function callOpenAICompatibleHunyuanVisionJson({ imageUrl, prompt, tempera
   return parseJsonContent(content || '');
 }
 
-async function callTencentCloudHunyuanVisionJson({ imageUrl, prompt, temperature = 0.2 }) {
+async function callTencentCloudHunyuanVisionJson({ imageUrl, imageUrls = [], prompt, temperature = 0.2 }) {
   const fetchClient = getFetch();
   const endpointHost = new URL(HUNYUAN_CONFIG.tencentEndpoint).host;
+  const modelImages = normalizeModelImageUrls(imageUrl, imageUrls);
   const requestBody = {
     Model: HUNYUAN_CONFIG.model,
     Stream: false,
@@ -1003,7 +1093,7 @@ async function callTencentCloudHunyuanVisionJson({ imageUrl, prompt, temperature
         Role: 'user',
         Contents: [
           { Type: 'text', Text: prompt },
-          { Type: 'image_url', ImageUrl: { Url: imageUrl } }
+          ...modelImages.map((url) => ({ Type: 'image_url', ImageUrl: { Url: url } }))
         ]
       }
     ]
@@ -1169,9 +1259,28 @@ async function sendEmailViaSmtp(to, code) {
   });
 }
 
-async function sendEmailCode(event) {
+async function sendEmailCode(event, context = {}) {
   const email = normalizeShanghaiTechEmail(event.email);
   if (!email) return fail(`请使用 @${AUTH_CONFIG.emailDomain} 邮箱`, 'INVALID_EMAIL');
+  const requesterIdentity = getClassifyRateKey(event, context);
+  const emailRateError = await checkPersistentActionRateLimit({
+    namespace: 'otp-email',
+    identity: emailHash(email),
+    maxRequests: AUTH_CONFIG.maxCodesPerEmailWindow,
+    windowMs: AUTH_CONFIG.codeRateWindowMs,
+    minIntervalMs: AUTH_CONFIG.codeCooldownMs,
+    message: '该邮箱验证码发送过于频繁'
+  });
+  if (emailRateError) return emailRateError;
+  const requesterRateError = await checkPersistentActionRateLimit({
+    namespace: 'otp-requester',
+    identity: requesterIdentity,
+    maxRequests: AUTH_CONFIG.maxCodesPerRequesterWindow,
+    windowMs: AUTH_CONFIG.codeRateWindowMs,
+    minIntervalMs: AUTH_CONFIG.codeCooldownMs,
+    message: '验证码请求过于频繁'
+  });
+  if (requesterRateError) return requesterRateError;
   const ready = await ensureEmailCodeCollection();
   if (!ready) return fail('验证码存储未就绪，请先在云开发数据库创建 email_login_codes 集合', 'EMAIL_CODE_STORE_ERROR');
   const purpose = event.purpose === 'register' ? 'register' : 'login';
@@ -1239,20 +1348,41 @@ async function verifyEmailCode(email, code) {
     .get();
   const record = (result.data || []).find((entry) => entry.expiresAtMs && entry.expiresAtMs >= nowMs);
   if (!record) return fail('验证码已过期或不存在，请重新获取', 'CODE_EXPIRED');
-  if ((record.attempts || 0) >= AUTH_CONFIG.maxCodeAttempts) {
-    return fail('验证码尝试次数过多，请重新获取', 'CODE_LOCKED');
-  }
-  const expected = sha256(`${normalized}:${value}:${record.codeSalt}`);
-  if (!safeEqual(expected, record.codeHash)) {
-    await db.collection(COLLECTIONS.emailCodes).doc(record._id).update({
-      data: { attempts: _.inc(1), updatedAt: now() }
+  return db.runTransaction(async (transaction) => {
+    const doc = transaction.collection(COLLECTIONS.emailCodes).doc(record._id);
+    const latest = (await doc.get()).data;
+    const expected = sha256(`${normalized}:${value}:${latest.codeSalt}`);
+    const decision = evaluateOtpRecord(latest, {
+      nowMs: Date.now(),
+      maxAttempts: AUTH_CONFIG.maxCodeAttempts,
+      matches: safeEqual(expected, latest.codeHash)
     });
-    return fail('验证码不正确', 'INVALID_CODE');
-  }
-  await db.collection(COLLECTIONS.emailCodes).doc(record._id).update({
-    data: { used: true, usedAt: now(), updatedAt: now() }
+    if (decision.reason === 'expired') return fail('验证码已过期或不存在，请重新获取', 'CODE_EXPIRED');
+    if (decision.reason === 'locked') return fail('验证码尝试次数过多，请重新获取', 'CODE_LOCKED');
+    if (decision.incrementAttempts) {
+      await doc.update({ data: { attempts: _.inc(1), updatedAt: now() } });
+      return fail('验证码不正确', 'INVALID_CODE');
+    }
+    await doc.update({ data: { used: true, usedAt: now(), updatedAt: now() } });
+    return null;
   });
-  return null;
+}
+
+async function ensureQQCollections() {
+  if (qqCollectionsReady) return true;
+  if (qqCollectionsDisabled) return false;
+  for (const name of [COLLECTIONS.qqEvents, COLLECTIONS.qqDrafts, COLLECTIONS.qqOutbox]) {
+    try {
+      await db.createCollection(name);
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) {
+        qqCollectionsDisabled = true;
+        return false;
+      }
+    }
+  }
+  qqCollectionsReady = true;
+  return true;
 }
 
 async function createEmailUser({ email, password = '', nickName = '' }) {
@@ -1924,7 +2054,7 @@ async function getLatestClaimRequest(itemId, claimantOpenid) {
   return (result.data && result.data[0]) || null;
 }
 
-async function getApprovedClaimRequest(requestId, itemId, claimantOpenid) {
+async function getApprovedClaimRequest(requestId, itemId, claimantOpenid, item = {}) {
   if (!requestId) return null;
   const ready = await ensureClaimRequestCollection();
   if (!ready) return null;
@@ -1936,7 +2066,7 @@ async function getApprovedClaimRequest(requestId, itemId, claimantOpenid) {
     if (!isNotFoundError(error)) throw error;
   }
   if (!request) return null;
-  if (request.itemId !== itemId || request.claimantOpenid !== claimantOpenid || request.status !== 'approved') return null;
+  if (!isApprovedToViewRequest(request, itemId, claimantOpenid, { notBeforeMs: claimTokenNotBeforeMs(item) })) return null;
   return { _id: requestId, ...request };
 }
 
@@ -2010,34 +2140,55 @@ async function completeClaim({ itemId, item, claimantOpenid, claimantUser = {}, 
     updatedAt: claimedAt
   };
 
-  await db.collection(COLLECTIONS.items).doc(itemId).update({ data: updateData });
+  const reservation = await db.runTransaction(async (transaction) => {
+    const doc = transaction.collection(COLLECTIONS.items).doc(itemId);
+    let currentItem = null;
+    try {
+      currentItem = (await doc.get()).data;
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+    if (!currentItem || !canCompleteActiveClaim(currentItem)) {
+      return { completed: false, item: currentItem };
+    }
+    await doc.update({ data: updateData });
+    return { completed: true, item: currentItem };
+  });
+  if (!reservation.completed) return { conflict: true };
+  const currentItem = reservation.item || item;
 
   const commentData = {
     itemId,
     authorOpenid: claimantOpenid,
     authorName: cleanName,
     content: cleanContact ? `${cleanName} 已认领：${cleanContact}` : `${cleanName} 已认领`,
+    visibility: 'claim_parties',
     status: 'active',
     createdAt: claimedAt
   };
-  const comment = await db.collection(COLLECTIONS.comments).add({ data: commentData });
-  const safeItem = sanitizeFoundItemPrivacy(item);
-  await createNotification(item.ownerOpenid, 'claim', `${cleanName} 已认领：${safeItem.title}`, itemId, claimantOpenid);
+  const comment = await db.collection(COLLECTIONS.comments).add({ data: commentData }).catch((error) => {
+    console.warn('Failed to create claim comment after atomic claim transition.', error && (error.message || error));
+    return null;
+  });
+  const safeItem = sanitizeFoundItemPrivacy(currentItem);
+  await createNotification(currentItem.ownerOpenid, 'claim', `${cleanName} 已认领：${safeItem.title}`, itemId, claimantOpenid).catch((error) => {
+    console.warn('Failed to create claim notification after atomic claim transition.', error && (error.message || error));
+  });
   if (notifyOwner) {
-    await notifyOwnerItemClaimed(item, claimantUser, { claimantName: cleanName, claimantContact: cleanContact }).catch((error) => {
+    await notifyOwnerItemClaimed(currentItem, claimantUser, { claimantName: cleanName, claimantContact: cleanContact }).catch((error) => {
       console.warn('Failed to send claim email notification.', error && (error.message || error));
     });
   }
 
-  const hydrated = await hydrateItemImages([{ _id: itemId, ...item, ...updateData }]);
+  const hydrated = await hydrateItemImages([{ _id: itemId, ...currentItem, ...updateData }]).catch(() => ([{ _id: itemId, ...currentItem, ...updateData }]));
   return {
     item: sanitizeFoundItemPrivacy(hydrated[0]),
-    comment: { _id: comment._id, ...commentData }
+    comment: comment ? { _id: comment._id, ...commentData } : null
   };
 }
 
 async function verifyClaimDescription(event, context) {
-  const actor = requireActorId(context, event);
+  const actor = requireVerifiedActor(event);
   if (actor.error) return actor.error;
   if (!event.itemId) return fail('缺少 itemId');
   const description = normalizeClaimDescription(event.description);
@@ -2069,13 +2220,23 @@ async function verifyClaimDescription(event, context) {
 
   const claimantUser = await getUserByActorId(actor.actorId);
   const existingRequest = await getLatestClaimRequest(event.itemId, actor.actorId);
+  if (isApprovedToViewRequest(existingRequest, event.itemId, actor.actorId, { notBeforeMs: claimTokenNotBeforeMs(item) })) {
+    return ok({
+      status: 'verified',
+      verified: true,
+      requestId: existingRequest._id,
+      claimToken: createClaimToken(event.itemId, actor.actorId),
+      expiresInSeconds: Math.floor(CLAIM_CONFIG.tokenTtlMs / 1000),
+      modelDecision: existingRequest.modelDecision || {},
+      message: '发布者已通过，请查看图片后由你确认认领'
+    });
+  }
   if (
     existingRequest
     && existingRequest.status === 'pending_review'
     && existingRequest.descriptionFingerprint
     && descriptionFingerprint
     && safeEqual(existingRequest.descriptionFingerprint, descriptionFingerprint)
-    && existingRequest.modelDecision?.method === 'vision'
   ) {
     return ok({
       status: 'pending_review',
@@ -2084,6 +2245,26 @@ async function verifyClaimDescription(event, context) {
       message: '已提交发布者人工确认'
     });
   }
+
+  const userClaimRateError = await checkPersistentActionRateLimit({
+    namespace: 'claim-model-user',
+    identity: actor.actorId,
+    maxRequests: CLAIM_CONFIG.maxUserAttempts,
+    windowMs: CLAIM_CONFIG.userAttemptWindowMs,
+    minIntervalMs: CLAIM_CONFIG.userAttemptCooldownMs,
+    message: '认领描述校验总量过于频繁'
+  });
+  if (userClaimRateError) return userClaimRateError;
+
+  const claimRateError = await checkPersistentActionRateLimit({
+    namespace: 'claim-model',
+    identity: `${event.itemId}:${actor.actorId}`,
+    maxRequests: CLAIM_CONFIG.maxAttempts,
+    windowMs: CLAIM_CONFIG.attemptWindowMs,
+    minIntervalMs: CLAIM_CONFIG.attemptCooldownMs,
+    message: '认领描述校验过于频繁'
+  });
+  if (claimRateError) return claimRateError;
 
   const attemptCount = (existingRequest?.attemptCount || 0) + 1;
   let modelDecision;
@@ -2121,16 +2302,28 @@ async function verifyClaimDescription(event, context) {
     attemptCount,
     existingRequest
   });
-  await createNotification(
-    item.ownerOpenid,
-    'claim_review',
-    `${request.claimantName} 提交了敏感卡面物品认领描述，等待你确认：${safeItem.title}`,
-    event.itemId,
-    actor.actorId
-  ).catch(() => null);
-  await notifyOwnerClaimReviewRequested(item, request).catch((error) => {
-    console.warn('Failed to send claim review email notification.', error && (error.message || error));
-  });
+  const notificationNowMs = Date.now();
+  if (shouldNotifyOwner(existingRequest || request, notificationNowMs, CLAIM_CONFIG.ownerNotificationCooldownMs)) {
+    await createNotification(
+      item.ownerOpenid,
+      'claim_review',
+      `${request.claimantName} 提交了敏感物品认领描述，等待你确认：${safeItem.title}`,
+      event.itemId,
+      actor.actorId
+    ).catch(() => null);
+    const notifyResult = await notifyOwnerClaimReviewRequested(item, request).catch((error) => {
+      console.warn('Failed to send claim review email notification.', error && (error.message || error));
+      return { sent: false };
+    });
+    await db.collection(COLLECTIONS.claimRequests).doc(request._id).update({
+      data: {
+        ownerNotifiedAtMs: notificationNowMs,
+        ownerNotifiedAt: now(),
+        ownerNotificationSent: Boolean(notifyResult.sent),
+        updatedAt: now()
+      }
+    }).catch(() => null);
+  }
 
   return ok({
     status: 'pending_review',
@@ -2141,7 +2334,7 @@ async function verifyClaimDescription(event, context) {
 }
 
 async function reviewClaimRequest(event, context) {
-  const actor = requireActorId(context, event);
+  const actor = requireVerifiedActor(event);
   if (actor.error) return actor.error;
   const requestId = String(event.requestId || '').trim();
   const action = String(event.decision || event.reviewAction || '').trim();
@@ -2150,44 +2343,100 @@ async function reviewClaimRequest(event, context) {
   const ready = await ensureClaimRequestCollection();
   if (!ready) return fail('认领请求存储未就绪，请先创建 claim_requests 集合', 'CLAIM_REQUEST_STORE_ERROR');
 
-  const requestResult = await db.collection(COLLECTIONS.claimRequests).doc(requestId).get();
-  const request = requestResult.data;
-  if (!request) return fail('认领请求不存在', 'REQUEST_NOT_FOUND');
-  if (request.status !== 'pending_review') return fail('该认领请求已处理', 'REQUEST_ALREADY_REVIEWED');
-
-  const itemResult = await db.collection(COLLECTIONS.items).doc(request.itemId).get();
-  const item = itemResult.data;
-  if (!item) return fail('物品不存在', 'ITEM_NOT_FOUND');
-  if (item.ownerOpenid !== actor.actorId) return fail('只能处理自己发布物品的认领请求', 'FORBIDDEN');
-  if (item.status === 'returned') return fail('该物品已回家，不能重复认领', 'ALREADY_RETURNED');
-
+  const reviewedAtMs = Date.now();
+  const reviewedAt = now();
   const reviewData = {
-    status: action === 'approve' ? 'approved' : 'rejected',
+    status: reviewStatusForDecision(action),
     reviewerOpenid: actor.actorId,
-    reviewedAt: now(),
-    updatedAt: now()
+    reviewedAtMs,
+    reviewedAt,
+    updatedAt: reviewedAt
   };
-  await db.collection(COLLECTIONS.claimRequests).doc(requestId).update({ data: reviewData });
+  const reviewResult = await db.runTransaction(async (transaction) => {
+    const requestDoc = transaction.collection(COLLECTIONS.claimRequests).doc(requestId);
+    let request = null;
+    try {
+      request = (await requestDoc.get()).data;
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+    if (!request) return { error: fail('认领请求不存在', 'REQUEST_NOT_FOUND') };
+    if (request.status !== 'pending_review') return { error: fail('该认领请求已处理', 'REQUEST_ALREADY_REVIEWED') };
+
+    const itemDoc = transaction.collection(COLLECTIONS.items).doc(request.itemId);
+    let item = null;
+    try {
+      item = (await itemDoc.get()).data;
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+    if (!item) return { error: fail('物品不存在', 'ITEM_NOT_FOUND') };
+    if (item.ownerOpenid !== actor.actorId) return { error: fail('只能处理自己发布物品的认领请求', 'FORBIDDEN') };
+    if (item.status === 'returned') return { error: fail('该物品已回家，不能重复认领', 'ALREADY_RETURNED') };
+
+    await requestDoc.update({ data: reviewData });
+    return { request, item };
+  });
+  if (reviewResult.error) return reviewResult.error;
+  const { request, item } = reviewResult;
 
   if (action === 'reject') {
     await createNotification(request.claimantOpenid, 'claim_review', `发布者未通过你的认领描述：${sanitizeFoundItemPrivacy(item).title}`, request.itemId, actor.actorId).catch(() => null);
     return ok({ request: { _id: requestId, ...request, ...reviewData } });
   }
 
-  const claimantUser = await getUserByActorId(request.claimantOpenid);
-  const result = await completeClaim({
-    itemId: request.itemId,
-    item,
-    claimantOpenid: request.claimantOpenid,
-    claimantUser,
-    claimantName: request.claimantName,
-    claimantContact: request.claimantContact,
-    notifyOwner: false
-  });
-  await createNotification(request.claimantOpenid, 'claim_review', `发布者已通过你的认领描述：${sanitizeFoundItemPrivacy(item).title}`, request.itemId, actor.actorId).catch(() => null);
+  await createNotification(request.claimantOpenid, 'claim_review', `发布者已通过你的认领描述；请查看图片后确认：${sanitizeFoundItemPrivacy(item).title}`, request.itemId, actor.actorId).catch(() => null);
   return ok({
-    request: { _id: requestId, ...request, ...reviewData },
-    ...result
+    request: { _id: requestId, ...request, ...reviewData }
+  });
+}
+
+async function getClaimRequestStatus(event) {
+  const actor = requireVerifiedActor(event);
+  if (actor.error) return actor.error;
+  const requestId = String(event.requestId || '').trim();
+  const itemId = String(event.itemId || '').trim();
+  if (!requestId || !itemId) return fail('缺少 itemId 或 requestId');
+  const ready = await ensureClaimRequestCollection();
+  if (!ready) return fail('认领请求存储未就绪', 'CLAIM_REQUEST_STORE_ERROR');
+  let request;
+  try {
+    request = (await db.collection(COLLECTIONS.claimRequests).doc(requestId).get()).data;
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error;
+  }
+  if (!request || request.itemId !== itemId || request.claimantOpenid !== actor.actorId) {
+    return fail('认领请求不存在', 'REQUEST_NOT_FOUND');
+  }
+  if (request.status === CLAIM_REQUEST_STATUS.APPROVED_TO_VIEW) {
+    let item = null;
+    try {
+      item = (await db.collection(COLLECTIONS.items).doc(itemId).get()).data;
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+    const approvalStillValid = item
+      && canCompleteActiveClaim(item)
+      && isApprovedToViewRequest(request, itemId, actor.actorId, { notBeforeMs: claimTokenNotBeforeMs(item) });
+    if (!approvalStillValid) {
+      return ok({
+        status: 'invalidated',
+        requestId,
+        message: '物品状态已变化，请重新提交认领描述'
+      });
+    }
+    return ok({
+      status: 'verified',
+      requestId,
+      claimToken: createClaimToken(itemId, actor.actorId),
+      expiresInSeconds: Math.floor(CLAIM_CONFIG.tokenTtlMs / 1000),
+      message: '发布者已通过，请查看图片后确认认领'
+    });
+  }
+  return ok({
+    status: request.status,
+    requestId,
+    message: request.status === CLAIM_REQUEST_STATUS.REJECTED ? '发布者未通过该认领描述' : '仍在等待发布者确认'
   });
 }
 
@@ -2282,7 +2531,7 @@ async function classifyImage(event, context) {
 }
 
 async function createItem(event, context) {
-  const actor = requireActorId(context, event);
+  const actor = requireVerifiedActor(event);
   if (actor.error) return actor.error;
   const payload = event.payload || {};
   const preparedImages = await prepareItemImages(payload.imageUrls || [], actor.actorId);
@@ -2349,6 +2598,466 @@ async function createItem(event, context) {
   return ok(hydrated[0]);
 }
 
+function verifyQQIngestSignature(event = {}) {
+  if (!QQ_INGEST_CONFIG.secret) return fail('QQ 接入密钥未配置', 'QQ_INGEST_NOT_CONFIGURED');
+  const timestamp = Number(event.timestamp || 0);
+  const signature = String(event.signature || '').trim().toLowerCase();
+  if (!timestamp || Math.abs(Date.now() - timestamp) > QQ_INGEST_CONFIG.signatureTtlMs) {
+    return fail('QQ 接入签名已过期', 'INVALID_QQ_SIGNATURE');
+  }
+  const expected = hmac(QQ_INGEST_CONFIG.secret, qqSignatureMessage(event.action, timestamp, event.payload || {}), 'hex');
+  return safeEqual(expected, signature) ? null : fail('QQ 接入签名无效', 'INVALID_QQ_SIGNATURE');
+}
+
+function verifyQQAdminSignature(event = {}) {
+  if (!QQ_INGEST_CONFIG.adminSecret) return fail('QQ 审核密钥未配置', 'QQ_ADMIN_NOT_CONFIGURED');
+  const timestamp = Number(event.timestamp || 0);
+  const signature = String(event.signature || '').trim().toLowerCase();
+  if (!timestamp || Math.abs(Date.now() - timestamp) > QQ_INGEST_CONFIG.signatureTtlMs) {
+    return fail('QQ 审核签名已过期', 'INVALID_QQ_ADMIN_SIGNATURE');
+  }
+  const expected = hmac(QQ_INGEST_CONFIG.adminSecret, qqSignatureMessage(event.action, timestamp, event.payload || {}), 'hex');
+  return safeEqual(expected, signature) ? null : fail('QQ 审核签名无效', 'INVALID_QQ_ADMIN_SIGNATURE');
+}
+
+function buildQQExtractionPrompt(payload = {}) {
+  return [
+    '你是校园失物招领结构化助手。结合群消息文字与图片，判断是否为真实失物/招领线索。',
+    '只返回 JSON：isLostFound, confidence(0-1), type(found/lost), title, description, category, locationRaw, locationName, occurredAtText, sensitivityLevel(normal/important/sensitive), aiTags, reason。',
+    'locationRaw 保留原文地点，locationName 规范为校园建筑或区域；无法确定时留空。',
+    '校园卡、银行卡、证件、带姓名学号的纸张为 sensitive；手机、耳机、钱包、钥匙等为 important。',
+    '不要抄录姓名、学号、卡号、手机号、二维码内容或任何唯一编号。',
+    `群消息：${String(payload.text || '').slice(0, 1200) || '（无文字，仅有图片）'}`,
+    `发送时间：${String(payload.sentAt || '').slice(0, 80) || '未知'}`
+  ].join('\n');
+}
+
+async function resolveQQCampusLocation(extraction = {}) {
+  const nowMs = Date.now();
+  if (qqLocationCache.expiresAtMs <= nowMs) {
+    const result = await db.collection(COLLECTIONS.locations).where({ enabled: true }).limit(100).get();
+    qqLocationCache = { expiresAtMs: nowMs + 10 * 60 * 1000, locations: result.data || [] };
+  }
+  const requestedId = String(extraction.locationId || '').trim();
+  if (requestedId) return qqLocationCache.locations.find((location) => location._id === requestedId) || null;
+  const text = [extraction.locationName, extraction.locationRaw].filter(Boolean).join(' ');
+  return matchCampusLocation(qqLocationCache.locations, text);
+}
+
+async function ingestQQBatch(event) {
+  const signatureError = verifyQQIngestSignature(event);
+  if (signatureError) return signatureError;
+  const payload = event.payload || {};
+  const messageIds = unique(payload.messageIds || []).sort();
+  const groupName = String(payload.groupName || '').trim();
+  const groupId = String(payload.groupId || '').trim();
+  if (!messageIds.length || !groupId || !payload.senderId) return fail('QQ 事件缺少消息 ID、群或发送者', 'INVALID_QQ_EVENT');
+  const groupAllowed = QQ_INGEST_CONFIG.allowedGroupIds.size
+    ? QQ_INGEST_CONFIG.allowedGroupIds.has(groupId)
+    : groupName === QQ_INGEST_CONFIG.allowedGroupName;
+  if (!groupAllowed) return fail('该 QQ 群不在接入白名单', 'QQ_GROUP_NOT_ALLOWED');
+  if (!await ensureQQCollections()) return fail('QQ 接入集合未就绪', 'QQ_STORE_ERROR');
+
+  const batchId = sha256(`${groupId}:${messageIds.join(',')}`);
+  const eventDoc = db.collection(COLLECTIONS.qqEvents).doc(batchId);
+  const messageLockIds = messageIds.map((messageId) => `msg_${sha256(`${groupId}:${messageId}`)}`);
+  const leaseNowMs = Date.now();
+  const reservation = await db.runTransaction(async (transaction) => {
+    const doc = transaction.collection(COLLECTIONS.qqEvents).doc(batchId);
+    let existing = null;
+    try {
+      existing = (await doc.get()).data;
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+    if (existing?.result) return { acquired: false, result: existing.result };
+    if (existing?.status === 'processing' && Number(existing.leaseExpiresAtMs || 0) > leaseNowMs) {
+      return { acquired: false, processing: true };
+    }
+    for (const lockId of messageLockIds) {
+      const lockDoc = transaction.collection(COLLECTIONS.qqEvents).doc(lockId);
+      let lock = null;
+      try {
+        lock = (await lockDoc.get()).data;
+      } catch (error) {
+        if (!isNotFoundError(error)) throw error;
+      }
+      if (lock?.status === 'completed' || (lock?.status === 'processing' && Number(lock.leaseExpiresAtMs || 0) > leaseNowMs)) {
+        return { acquired: false, duplicateMessage: true, duplicateBatchId: lock.batchId || '' };
+      }
+    }
+    await doc.set({
+      data: {
+        status: 'processing',
+        leaseExpiresAtMs: leaseNowMs + 2 * 60 * 1000,
+        messageIds,
+        updatedAt: now()
+      }
+    });
+    for (let index = 0; index < messageLockIds.length; index += 1) {
+      await transaction.collection(COLLECTIONS.qqEvents).doc(messageLockIds[index]).set({
+        data: {
+          status: 'processing',
+          batchId,
+          groupId,
+          messageId: messageIds[index],
+          leaseExpiresAtMs: leaseNowMs + 2 * 60 * 1000,
+          updatedAt: now()
+        }
+      });
+    }
+    return { acquired: true };
+  });
+  if (!reservation.acquired) {
+    if (reservation.result) return ok({ ...reservation.result, duplicate: true });
+    return ok({
+      status: reservation.duplicateMessage ? 'duplicate_message' : 'processing',
+      duplicate: true,
+      duplicateBatchId: reservation.duplicateBatchId || '',
+      replyText: ''
+    });
+  }
+
+  const actorId = `qq:${sha256(`${groupId}:${payload.senderId}`).slice(0, 40)}`;
+  const images = Array.isArray(payload.images) ? payload.images.slice(0, 6) : [];
+  const preparedImages = await prepareItemImages(images, actorId, `qq:${batchId}`);
+  const hydrated = (await hydrateItemImages([{
+    _id: batchId,
+    imageFileIds: preparedImages.imageFileIds,
+    imageUrls: preparedImages.imageUrls
+  }]))[0] || {};
+  let rawExtraction = {};
+  let modelError = '';
+  const modelImages = unique(hydrated.imageUrls || (hydrated.image ? [hydrated.image] : [])).slice(0, 6);
+  if (HUNYUAN_CONFIG.apiKey || (HUNYUAN_CONFIG.secretId && HUNYUAN_CONFIG.secretKey)) {
+    try {
+      rawExtraction = await callHunyuanVisionJson({
+        imageUrls: modelImages,
+        prompt: buildQQExtractionPrompt(payload),
+        temperature: 0.1
+      });
+    } catch (error) {
+      modelError = error.message || '模型提取失败';
+    }
+  } else {
+    modelError = '模型未配置';
+  }
+  if (!Object.keys(rawExtraction || {}).length) {
+    const fallback = classifyByText(payload.text || '');
+    rawExtraction = {
+      isLostFound: Boolean(images.length || String(payload.text || '').trim()),
+      confidence: images.length ? 0.5 : 0.35,
+      type: 'found',
+      title: fallback.category || 'QQ群失物招领',
+      description: payload.text || '来自QQ群的图片线索',
+      category: fallback.category || '其他',
+      locationRaw: '',
+      locationName: '',
+      aiTags: fallback.aiTags || [],
+      reason: modelError
+    };
+  }
+
+  const extraction = normalizeQQExtraction(rawExtraction, payload.text || '');
+  const matchedLocation = await resolveQQCampusLocation(extraction).catch(() => null);
+  const privacySafe = sanitizeFoundItemPrivacy({
+    ...extraction,
+    type: extraction.type,
+    locationSuggested: extraction.locationName,
+    locationId: matchedLocation?._id || '',
+    locationName: matchedLocation?.name || '',
+    locationArea: matchedLocation?.area || '',
+    locationNearby: matchedLocation?.nearby || [],
+    locationGuide: matchedLocation?.detail || '',
+    mapX: optionalNumber(matchedLocation?.mapX),
+    mapY: optionalNumber(matchedLocation?.mapY),
+    latitude: optionalNumber(matchedLocation?.latitude),
+    longitude: optionalNumber(matchedLocation?.longitude)
+  });
+  let route = routeQQExtraction(privacySafe, {
+    high: QQ_INGEST_CONFIG.highConfidence,
+    medium: QQ_INGEST_CONFIG.mediumConfidence
+  });
+  if (route === 'published' && isProtectedFoundItem(privacySafe) && !QQ_INGEST_CONFIG.reviewOwnerActorId) {
+    route = 'needs_review';
+  }
+  const source = {
+    platform: 'qq',
+    groupId,
+    groupName,
+    messageId: messageIds[0],
+    messageIds,
+    senderHash: sha256(String(payload.senderId)),
+    sentAt: String(payload.sentAt || ''),
+    ingestedAtMs: Date.now()
+  };
+  let result;
+
+  if (route === 'published') {
+    const itemData = sanitizeFoundItemPrivacy({
+      type: privacySafe.type,
+      title: privacySafe.title,
+      description: privacySafe.description,
+      category: privacySafe.category,
+      aiTags: privacySafe.aiTags,
+      imageFileIds: preparedImages.imageFileIds,
+      imageUrls: [],
+      thumbUrl: '',
+      visualDescription: privacySafe.description,
+      locationId: privacySafe.locationId,
+      locationName: privacySafe.locationName,
+      locationArea: privacySafe.locationArea || 'QQ 群线索',
+      locationNearby: privacySafe.locationNearby || [],
+      locationGuide: privacySafe.locationGuide || '',
+      locationDetail: privacySafe.locationRaw,
+      mapX: privacySafe.mapX,
+      mapY: privacySafe.mapY,
+      latitude: privacySafe.latitude,
+      longitude: privacySafe.longitude,
+      occurredAtText: privacySafe.occurredAtText,
+      status: 'active',
+      ownerOpenid: QQ_INGEST_CONFIG.reviewOwnerActorId || actorId,
+      ownerName: '上科大健忘者互助协会',
+      source,
+      createdAt: now(),
+      updatedAt: now()
+    });
+    const itemId = `qq_${batchId.slice(0, 28)}`;
+    await db.collection(COLLECTIONS.items).doc(itemId).set({ data: itemData });
+    const itemUrl = QQ_INGEST_CONFIG.publicBaseUrl ? `${QQ_INGEST_CONFIG.publicBaseUrl}/?item=${encodeURIComponent(itemId)}` : '';
+    const replyText = `已录入 LockMyItem${itemUrl ? `：${itemUrl}` : ''}`;
+    await db.collection(COLLECTIONS.qqOutbox).doc(`qqo_${batchId.slice(0, 28)}`).set({
+      data: {
+        status: 'pending',
+        groupId,
+        messageId: messageIds[0],
+        replyUntilMs: qqReplyDeadlineMs(source.sentAt),
+        content: replyText,
+        attempts: 0,
+        createdAt: now(),
+        updatedAt: now()
+      }
+    });
+    result = { status: 'published', itemId, itemUrl, replyText, replyQueued: true };
+  } else if (route === 'needs_review') {
+    const draftId = `qqd_${batchId.slice(0, 28)}`;
+    await db.collection(COLLECTIONS.qqDrafts).doc(draftId).set({
+      data: {
+        status: 'pending_review',
+        extraction: privacySafe,
+        imageFileIds: preparedImages.imageFileIds,
+        source,
+        modelError,
+        createdAt: now(),
+        updatedAt: now()
+      }
+    });
+    result = { status: 'needs_review', draftId, replyText: '' };
+  } else {
+    if (preparedImages.imageFileIds.length) {
+      await cloud.deleteFile({ fileList: preparedImages.imageFileIds }).catch(() => null);
+    }
+    result = { status: 'ignored', replyText: '' };
+  }
+
+  await eventDoc.set({ data: { status: 'completed', source, route, result, leaseExpiresAtMs: 0, createdAt: now(), updatedAt: now() } });
+  await Promise.all(messageLockIds.map((lockId) => db.collection(COLLECTIONS.qqEvents).doc(lockId).update({
+    data: { status: 'completed', batchId, resultStatus: result.status, leaseExpiresAtMs: 0, updatedAt: now() }
+  }).catch(() => null)));
+  return ok(result);
+}
+
+async function listQQDrafts(event) {
+  const signatureError = verifyQQAdminSignature(event);
+  if (signatureError) return signatureError;
+  if (!await ensureQQCollections()) return fail('QQ 接入集合未就绪', 'QQ_STORE_ERROR');
+  const limit = Math.min(50, Math.max(1, Number(event.payload?.limit || 20)));
+  const drafts = await db.collection(COLLECTIONS.qqDrafts)
+    .where({ status: 'pending_review' })
+    .orderBy('createdAt', 'desc')
+    .limit(limit)
+    .get();
+  return ok({ drafts: (drafts.data || []).map((draft) => ({
+    id: draft._id,
+    extraction: draft.extraction,
+    source: draft.source,
+    createdAt: draft.createdAt
+  })) });
+}
+
+async function reviewQQDraft(event) {
+  const signatureError = verifyQQAdminSignature(event);
+  if (signatureError) return signatureError;
+  const draftId = String(event.payload?.draftId || '').trim();
+  const decision = String(event.payload?.decision || '').trim();
+  if (!draftId || !['approve', 'reject'].includes(decision)) return fail('缺少有效 draftId 或审核动作');
+  if (!await ensureQQCollections()) return fail('QQ 接入集合未就绪', 'QQ_STORE_ERROR');
+  const draft = (await db.collection(COLLECTIONS.qqDrafts).doc(draftId).get()).data;
+  if (!draft) return fail('QQ 草稿不存在', 'QQ_DRAFT_NOT_FOUND');
+  if (draft.status !== 'pending_review') return fail('QQ 草稿已处理', 'QQ_DRAFT_ALREADY_REVIEWED');
+  if (decision === 'reject') {
+    const rejectedAt = now();
+    const rejection = await db.runTransaction(async (transaction) => {
+      const doc = transaction.collection(COLLECTIONS.qqDrafts).doc(draftId);
+      const current = (await doc.get()).data;
+      if (!current || current.status !== 'pending_review') {
+        return { error: fail('QQ 草稿已处理', 'QQ_DRAFT_ALREADY_REVIEWED') };
+      }
+      await doc.update({ data: { status: 'rejected', reviewedAt: rejectedAt, updatedAt: rejectedAt } });
+      return { draft: current };
+    });
+    if (rejection.error) return rejection.error;
+    if (Array.isArray(draft.imageFileIds) && draft.imageFileIds.length) {
+      await cloud.deleteFile({ fileList: draft.imageFileIds }).catch(() => null);
+    }
+    return ok({ status: 'rejected', draftId });
+  }
+
+  const corrected = applyQQReviewCorrections(draft.extraction || {}, event.payload?.corrections || {});
+  if (!corrected.title || !corrected.description || !corrected.category) {
+    return fail('批准前必须补全标题、描述和分类', 'QQ_REVIEW_FIELDS_REQUIRED');
+  }
+  const matchedLocation = await resolveQQCampusLocation(corrected).catch(() => null);
+  if (!matchedLocation) {
+    return fail('批准前必须选择唯一有效的校园地点', 'QQ_REVIEW_LOCATION_REQUIRED');
+  }
+  const extraction = sanitizeFoundItemPrivacy({
+    ...corrected,
+    type: corrected.type || 'found',
+    locationId: matchedLocation._id,
+    locationName: matchedLocation.name,
+    locationArea: matchedLocation.area || '',
+    locationNearby: matchedLocation.nearby || [],
+    locationGuide: matchedLocation.detail || '',
+    mapX: optionalNumber(matchedLocation.mapX),
+    mapY: optionalNumber(matchedLocation.mapY),
+    latitude: optionalNumber(matchedLocation.latitude),
+    longitude: optionalNumber(matchedLocation.longitude)
+  });
+  if (isProtectedFoundItem(extraction) && !QQ_INGEST_CONFIG.reviewOwnerActorId) {
+    return fail('敏感 QQ 物品需要先配置 QQ_REVIEW_OWNER_ACTOR_ID，供人工认领复核', 'QQ_REVIEW_OWNER_REQUIRED');
+  }
+  const itemData = sanitizeFoundItemPrivacy({
+    type: extraction.type,
+    title: extraction.title,
+    description: extraction.description,
+    category: extraction.category,
+    aiTags: extraction.aiTags || [],
+    imageFileIds: draft.imageFileIds || [],
+    imageUrls: [],
+    thumbUrl: '',
+    visualDescription: extraction.description,
+    locationId: extraction.locationId || '',
+    locationName: extraction.locationName,
+    locationArea: extraction.locationArea || 'QQ 群线索',
+    locationNearby: extraction.locationNearby || [],
+    locationGuide: extraction.locationGuide || '',
+    locationDetail: extraction.locationRaw,
+    mapX: optionalNumber(extraction.mapX),
+    mapY: optionalNumber(extraction.mapY),
+    latitude: optionalNumber(extraction.latitude),
+    longitude: optionalNumber(extraction.longitude),
+    occurredAtText: extraction.occurredAtText,
+    status: 'active',
+    ownerOpenid: QQ_INGEST_CONFIG.reviewOwnerActorId || `qq:${sha256(`${draft.source?.groupId || ''}:${draft.source?.senderHash || ''}`).slice(0, 40)}`,
+    ownerName: '上科大健忘者互助协会',
+    source: draft.source,
+    createdAt: now(),
+    updatedAt: now()
+  });
+  const itemId = `qq_${sha256(`draft:${draftId}`).slice(0, 28)}`;
+  const itemUrl = QQ_INGEST_CONFIG.publicBaseUrl ? `${QQ_INGEST_CONFIG.publicBaseUrl}/?item=${encodeURIComponent(itemId)}` : '';
+  const replyText = `已录入 LockMyItem${itemUrl ? `：${itemUrl}` : ''}`;
+  const approvedAt = now();
+  const approval = await db.runTransaction(async (transaction) => {
+    const draftDoc = transaction.collection(COLLECTIONS.qqDrafts).doc(draftId);
+    const current = (await draftDoc.get()).data;
+    if (!current || current.status !== 'pending_review') {
+      return { error: fail('QQ 草稿已处理', 'QQ_DRAFT_ALREADY_REVIEWED') };
+    }
+    await transaction.collection(COLLECTIONS.items).doc(itemId).set({ data: itemData });
+    if (draft.source?.groupId && draft.source?.messageId) {
+      await transaction.collection(COLLECTIONS.qqOutbox).doc(`qqoa_${sha256(draftId).slice(0, 27)}`).set({
+        data: {
+          status: 'pending',
+          groupId: draft.source.groupId,
+          messageId: draft.source.messageId,
+          replyUntilMs: qqReplyDeadlineMs(draft.source.sentAt),
+          content: replyText,
+          attempts: 0,
+          createdAt: approvedAt,
+          updatedAt: approvedAt
+        }
+      });
+    }
+    await draftDoc.update({
+      data: { status: 'approved', itemId, reviewedAt: approvedAt, updatedAt: approvedAt }
+    });
+    return { approved: true };
+  });
+  if (approval.error) return approval.error;
+  return ok({ status: 'published', draftId, itemId, itemUrl, replyText });
+}
+
+async function pullQQOutbox(event) {
+  const signatureError = verifyQQIngestSignature(event);
+  if (signatureError) return signatureError;
+  if (!await ensureQQCollections()) return fail('QQ 接入集合未就绪', 'QQ_STORE_ERROR');
+  const nowMs = Date.now();
+  const expired = await db.collection(COLLECTIONS.qqOutbox)
+    .where({ status: 'processing', leaseExpiresAtMs: _.lt(nowMs) })
+    .limit(10)
+    .get();
+  await Promise.all((expired.data || []).map((entry) => db.collection(COLLECTIONS.qqOutbox).doc(entry._id).update({
+    data: { status: 'pending', updatedAt: now() }
+  }).catch(() => null)));
+  const pending = await db.collection(COLLECTIONS.qqOutbox)
+    .where({ status: 'pending' })
+    .orderBy('createdAt', 'asc')
+    .limit(Math.min(10, Math.max(1, Number(event.payload?.limit || 5))))
+    .get();
+  const messages = [];
+  for (const candidate of pending.data || []) {
+    const claimed = await db.runTransaction(async (transaction) => {
+      const doc = transaction.collection(COLLECTIONS.qqOutbox).doc(candidate._id);
+      const current = (await doc.get()).data;
+      if (!current || current.status !== 'pending') return null;
+      await doc.update({
+        data: { status: 'processing', leaseExpiresAtMs: nowMs + 60 * 1000, attempts: _.inc(1), updatedAt: now() }
+      });
+      return {
+        id: candidate._id,
+        groupId: current.groupId,
+        messageId: qqReplyMessageId(current.messageId, current.replyUntilMs, nowMs),
+        content: current.content
+      };
+    });
+    if (claimed) messages.push(claimed);
+  }
+  return ok({ messages });
+}
+
+async function ackQQOutbox(event) {
+  const signatureError = verifyQQIngestSignature(event);
+  if (signatureError) return signatureError;
+  const outboxId = String(event.payload?.outboxId || '').trim();
+  const sent = event.payload?.sent === true;
+  if (!outboxId) return fail('缺少 outboxId');
+  const current = (await db.collection(COLLECTIONS.qqOutbox).doc(outboxId).get()).data;
+  if (!current) return fail('回复任务不存在', 'QQ_OUTBOX_NOT_FOUND');
+  const attempts = Number(current.attempts || 0);
+  await db.collection(COLLECTIONS.qqOutbox).doc(outboxId).update({
+    data: {
+      status: sent ? 'sent' : (attempts >= 5 ? 'failed' : 'pending'),
+      lastError: sent ? '' : String(event.payload?.error || 'QQ reply failed').slice(0, 300),
+      leaseExpiresAtMs: 0,
+      sentAt: sent ? now() : null,
+      updatedAt: now()
+    }
+  });
+  return ok({ outboxId, status: sent ? 'sent' : (attempts >= 5 ? 'failed' : 'pending') });
+}
+
 async function listItems(event) {
   const filters = event.filters || {};
   const actorId = getActorId({}, event);
@@ -2382,13 +3091,13 @@ async function getItemDetail(event) {
     : [];
   return ok({
     item: visibleItem,
-    comments: sanitizeCommentsForViewer(comments.data, canSeeClaimantInfo(event)),
+    comments: sanitizeCommentsForViewer(comments.data, canSeeClaimantInfo(items[0], actorId)),
     claimRequests
   });
 }
 
 async function createComment(event, context) {
-  const actor = requireActorId(context, event);
+  const actor = requireVerifiedActor(event);
   if (actor.error) return actor.error;
   const content = (event.content || '').trim();
   if (!content) return fail('评论不能为空');
@@ -2412,7 +3121,7 @@ async function createComment(event, context) {
 }
 
 async function sendThanks(event, context) {
-  const actor = requireActorId(context, event);
+  const actor = requireVerifiedActor(event);
   if (actor.error) return actor.error;
   const itemResult = await db.collection(COLLECTIONS.items).doc(event.itemId).get();
   const item = itemResult.data;
@@ -2434,7 +3143,7 @@ async function sendThanks(event, context) {
 }
 
 async function updateReturnStatus(event, context, returned) {
-  const actor = requireActorId(context, event);
+  const actor = requireVerifiedActor(event);
   if (actor.error) return actor.error;
   const itemResult = await db.collection(COLLECTIONS.items).doc(event.itemId).get();
   const item = itemResult.data;
@@ -2447,6 +3156,8 @@ async function updateReturnStatus(event, context, returned) {
       claimedByOpenid: null,
       claimantName: '',
       claimantContact: '',
+      claimTokenNotBefore: now(),
+      claimImageResetReason: returned ? 'owner_marked_returned' : 'owner_reopened_item',
       updatedAt: now()
     }
   });
@@ -2459,7 +3170,7 @@ function cleanClaimField(value = '', fallback = '', maxLength = 80) {
 }
 
 async function claimItem(event, context) {
-  const actor = requireActorId(context, event);
+  const actor = requireVerifiedActor(event);
   if (actor.error) return actor.error;
   if (!event.itemId) return fail('缺少 itemId');
 
@@ -2470,17 +3181,18 @@ async function claimItem(event, context) {
   if (item.status === 'returned') return fail('该物品已回家，不能重复认领', 'ALREADY_RETURNED');
   if (item.ownerOpenid === actor.actorId) return fail('不能认领自己发布的物品', 'FORBIDDEN');
 
+  let approvedRequest = null;
   if (isProtectedFoundItem(sanitizeFoundItemPrivacy(item))) {
     const tokenPayload = verifyClaimToken(event.claimToken, event.itemId, actor.actorId);
     const validToken = claimTokenAllowsItem(tokenPayload, item);
-    const approvedRequest = validToken ? null : await getApprovedClaimRequest(event.requestId, event.itemId, actor.actorId);
+    approvedRequest = await getApprovedClaimRequest(event.requestId, event.itemId, actor.actorId, item);
     if (!validToken && !approvedRequest) {
       return fail('敏感卡面物品需先提交特征描述，通过后才能认领', 'CLAIM_VERIFICATION_REQUIRED');
     }
   }
 
   const claimantUser = await getUserByActorId(actor.actorId);
-  return ok(await completeClaim({
+  const result = await completeClaim({
     itemId: event.itemId,
     item,
     claimantOpenid: actor.actorId,
@@ -2488,11 +3200,18 @@ async function claimItem(event, context) {
     claimantName: event.claimantName || event.nickName,
     claimantContact: event.claimantContact || event.contact,
     notifyOwner: true
-  }));
+  });
+  if (result.conflict) return fail('该物品已回家，不能重复认领', 'ALREADY_RETURNED');
+  if (approvedRequest?._id) {
+    await db.collection(COLLECTIONS.claimRequests).doc(approvedRequest._id).update({
+      data: { status: CLAIM_REQUEST_STATUS.COMPLETED, completedAt: now(), updatedAt: now() }
+    }).catch(() => null);
+  }
+  return ok(result);
 }
 
 async function reportContent(event, context) {
-  const actor = requireActorId(context, event);
+  const actor = requireVerifiedActor(event);
   if (actor.error) return actor.error;
   const data = {
     targetType: event.targetType,
@@ -2508,12 +3227,18 @@ async function reportContent(event, context) {
 
 exports.main = async (event = {}) => {
   try {
+    if (typeof event.body === 'string') {
+      const rawBody = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
+      event = JSON.parse(rawBody || '{}');
+    } else if (event.body && typeof event.body === 'object') {
+      event = event.body;
+    }
     const context = cloud.getWXContext();
     switch (event.action) {
       case 'login':
         return await login(event, context);
       case 'sendEmailCode':
-        return await sendEmailCode(event);
+        return await sendEmailCode(event, context);
       case 'registerWithEmail':
         return await registerWithEmail(event);
       case 'loginWithEmailPassword':
@@ -2526,6 +3251,16 @@ exports.main = async (event = {}) => {
         return await createItem(event, context);
       case 'classifyImage':
         return await classifyImage(event, context);
+      case 'ingestQQBatch':
+        return await ingestQQBatch(event);
+      case 'listQQDrafts':
+        return await listQQDrafts(event);
+      case 'reviewQQDraft':
+        return await reviewQQDraft(event);
+      case 'pullQQOutbox':
+        return await pullQQOutbox(event);
+      case 'ackQQOutbox':
+        return await ackQQOutbox(event);
       case 'listItems':
         return await listItems(event);
       case 'getItemDetail':
@@ -2538,6 +3273,8 @@ exports.main = async (event = {}) => {
         return await verifyClaimDescription(event, context);
       case 'reviewClaimRequest':
         return await reviewClaimRequest(event, context);
+      case 'getClaimRequestStatus':
+        return await getClaimRequestStatus(event);
       case 'sendThanks':
         return await sendThanks(event, context);
       case 'claimItem':

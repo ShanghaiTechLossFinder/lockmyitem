@@ -10,6 +10,7 @@ import {
   createItem,
   createLocalComment,
   getClientId,
+  getCloudClaimRequestStatus,
   loadCloudItemDetail,
   loadCloudItems,
   loadItems,
@@ -105,6 +106,19 @@ function itemBelongsToCurrentUser(item = {}, currentUser, currentClientId = '') 
   return Boolean(item.localOnly && currentClientId && ownerClientId === normalizedIdentity(currentClientId));
 }
 
+function itemIdFromUrl() {
+  if (typeof window === 'undefined') return '';
+  return new URLSearchParams(window.location.search).get('item') || '';
+}
+
+function currentUserCanSeeClaimant(item = {}, currentUser) {
+  if (!currentUser) return false;
+  const actorId = normalizedIdentity(currentUser.actorId || currentUser._openid || currentUser.openid || currentUser.id);
+  const ownerOpenid = normalizedIdentity(item.ownerOpenid || item.ownerId || item.openid);
+  const claimedByOpenid = normalizedIdentity(item.claimedByOpenid);
+  return Boolean(actorId && (actorId === ownerOpenid || actorId === claimedByOpenid));
+}
+
 function getStatsFromItems(sourceItems) {
   const active = sourceItems.filter((item) => item.status === 'active');
   return {
@@ -184,11 +198,12 @@ function locationDetailFromRecognition(data = {}, location) {
 }
 
 function App() {
+  const initialItemId = useMemo(() => itemIdFromUrl(), []);
   const [items, setItems] = useState(() => loadItems());
   const [currentUser, setCurrentUser] = useState(() => loadUser());
-  const [view, setView] = useState(() => loadSavedView());
+  const [view, setView] = useState(() => (initialItemId ? 'detail' : loadSavedView()));
   const [activeCategory, setActiveCategory] = useState('全部');
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(initialItemId || null);
   const [detailReturnTarget, setDetailReturnTarget] = useState(null);
   const [publishDraft, setPublishDraft] = useState(null);
   const [commentsByItem, setCommentsByItem] = useState({});
@@ -245,7 +260,11 @@ function App() {
       .then(({ item, comments, claimRequests }) => {
         if (cancelled) return;
         if (item) {
-          setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, ...item } : entry)));
+          setItems((current) => (
+            current.some((entry) => entry.id === item.id)
+              ? current.map((entry) => (entry.id === item.id ? { ...entry, ...item } : entry))
+              : [item, ...current]
+          ));
         }
         setCommentsByItem((current) => ({ ...current, [selectedId]: comments }));
         setClaimRequestsByItem((current) => ({ ...current, [selectedId]: claimRequests || [] }));
@@ -549,9 +568,46 @@ function App() {
           [request.itemId]: (current[request.itemId] || []).filter((entry) => entry.id !== request.id)
         }));
       }
-      setToast(decision === 'approve' ? '已通过认领请求，物品已移入已找到' : '已拒绝认领请求');
+      setToast(decision === 'approve' ? '已允许对方查看图片，等待对方确认认领' : '已拒绝认领请求');
     } catch (error) {
       setToast(`处理认领请求失败：${cloudErrorMessage(error)}`);
+    }
+  }
+
+  async function checkClaimRequestForItem(item) {
+    const access = claimAccessByItem[item.id] || {};
+    if (!access.requestId) return { status: 'missing' };
+    try {
+      const result = await getCloudClaimRequestStatus(item.id, access.requestId);
+      if (result.status === 'verified' && result.claimToken) {
+        setClaimAccessByItem((current) => ({
+          ...current,
+          [item.id]: { ...current[item.id], claimToken: result.claimToken, verifiedAt: new Date().toISOString() }
+        }));
+        const detail = await loadCloudItemDetail(item.id, result.claimToken);
+        if (detail.item) {
+          setItems((current) => current.map((entry) => (entry.id === detail.item.id ? { ...entry, ...detail.item } : entry)));
+        }
+        setCommentsByItem((current) => ({ ...current, [item.id]: detail.comments || [] }));
+        setToast('发布者已通过，请查看图片后确认认领');
+      } else if (result.status === 'invalidated' || result.status === 'rejected') {
+        setClaimAccessByItem((current) => {
+          const next = { ...current };
+          delete next[item.id];
+          return next;
+        });
+        const detail = await loadCloudItemDetail(item.id);
+        if (detail.item) {
+          setItems((current) => current.map((entry) => (entry.id === detail.item.id ? { ...entry, ...detail.item } : entry)));
+        }
+        setToast(result.message || '该认领请求已失效，请重新提交');
+      } else {
+        setToast(result.message || '仍在等待发布者确认');
+      }
+      return result;
+    } catch (error) {
+      setToast(`检查审核结果失败：${cloudErrorMessage(error)}`);
+      return { status: 'error' };
     }
   }
 
@@ -754,12 +810,14 @@ function App() {
           items={items}
           comments={commentsByItem[selectedItem.id] || []}
           claimRequests={claimRequestsByItem[selectedItem.id] || []}
+          claimAccess={claimAccessByItem[selectedItem.id] || {}}
           onBack={backFromDetail}
           claiming={claimingItemId === selectedItem.id}
           currentUser={currentUser}
           isOwnItem={itemBelongsToCurrentUser(selectedItem, currentUser, currentClientId)}
           onClaim={() => submitClaim(selectedItem)}
           onVerifyClaim={(description) => verifyClaimForItem(selectedItem, description)}
+          onCheckClaim={() => checkClaimRequestForItem(selectedItem)}
           onReviewClaim={reviewClaimForItem}
           onMarkReturned={() => markReturned(selectedItem.id)}
           onUndoReturned={() => undoReturned(selectedItem.id)}
@@ -895,7 +953,6 @@ function LostPage({ items, activeCategory, setActiveCategory, total, onPublish, 
 }
 
 function ReturnedPage({ items, total, onOpen, currentUser }) {
-  const canSeeClaimant = Boolean(currentUser);
   const list = items
     .filter((item) => item.status === 'returned')
     .sort((a, b) => new Date(b.returnedAt || b.createdAt) - new Date(a.returnedAt || a.createdAt));
@@ -917,7 +974,7 @@ function ReturnedPage({ items, total, onOpen, currentUser }) {
       ) : (
         <div className="feed-panel">
           {list.map((item) => {
-            const claimant = claimantText(item, canSeeClaimant);
+            const claimant = claimantText(item, currentUserCanSeeClaimant(item, currentUser));
             return (
               <button key={item.id} className="found-row" type="button" onClick={() => onOpen(item.id)}>
                 <span className="badge">已回家</span>
@@ -1943,17 +2000,18 @@ function AuthModal({ actionLabel, onClose, onSubmit, onSendCode }) {
   );
 }
 
-function DetailPage({ item, items, comments = [], claimRequests = [], onBack, claiming = false, currentUser, isOwnItem = false, onClaim, onVerifyClaim, onReviewClaim, onComment, onOpenMatch }) {
+function DetailPage({ item, items, comments = [], claimRequests = [], claimAccess = {}, onBack, claiming = false, currentUser, isOwnItem = false, onClaim, onVerifyClaim, onCheckClaim, onReviewClaim, onComment, onOpenMatch }) {
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [claimDescription, setClaimDescription] = useState('');
   const [claimVerifyMessage, setClaimVerifyMessage] = useState('');
   const [verifyingClaim, setVerifyingClaim] = useState(false);
+  const [checkingClaim, setCheckingClaim] = useState(false);
   const [reviewingRequestId, setReviewingRequestId] = useState('');
   const matches = findPotentialMatches(item, items);
-  const canSeeClaimant = Boolean(currentUser);
+  const canSeeClaimant = currentUserCanSeeClaimant(item, currentUser);
   const claimant = claimantText(item, canSeeClaimant);
-  const visibleComments = canSeeClaimant ? comments : comments.filter((comment) => !isClaimantComment(comment));
+  const visibleComments = comments;
   const protectedClaim = isProtectedFoundItem(item);
   const imageLocked = protectedClaim && item.claimImageLocked && !isOwnItem;
   const statusLabel = item.status === 'returned'
@@ -2008,6 +2066,15 @@ function DetailPage({ item, items, comments = [], claimRequests = [], onBack, cl
     setReviewingRequestId(requestId);
     await onReviewClaim(requestId, decision);
     setReviewingRequestId('');
+  }
+
+  async function checkClaimStatus() {
+    if (checkingClaim) return;
+    setCheckingClaim(true);
+    const result = await onCheckClaim();
+    if (result?.status === 'verified') setClaimVerifyMessage('已通过，请查看图片后确认认领。');
+    else if (result?.message) setClaimVerifyMessage(result.message);
+    setCheckingClaim(false);
   }
 
   return (
@@ -2070,16 +2137,26 @@ function DetailPage({ item, items, comments = [], claimRequests = [], onBack, cl
           <span className="section-kicker">认领前确认</span>
           <strong>请先描述物品特征</strong>
           <p>可以填写卡号、姓名、学号等可核验信息；系统仅用于后端匹配并脱敏处理，不会公开展示。不要只写“我的卡”“是我的”。</p>
-          <textarea
-            className="field textarea"
-            value={claimDescription}
-            placeholder="例如：蓝色卡套；上海银行标志；姓名或卡面编号"
-            onChange={(event) => setClaimDescription(event.target.value)}
-          />
+          {claimAccess.requestId ? (
+            <p>描述已提交。发布者通过后，你可以先查看图片，再自行确认是否认领。</p>
+          ) : (
+            <textarea
+              className="field textarea"
+              value={claimDescription}
+              placeholder="例如：蓝色卡套；上海银行标志；姓名或卡面编号"
+              onChange={(event) => setClaimDescription(event.target.value)}
+            />
+          )}
           {claimVerifyMessage && <div className="privacy-notice">{claimVerifyMessage}</div>}
-          <button className="button-primary detail-claim-button" type="submit" disabled={verifyingClaim || !claimDescription.trim()}>
-            {verifyingClaim ? '判断中' : '提交描述'}
-          </button>
+          {claimAccess.requestId ? (
+            <button className="button-primary detail-claim-button" type="button" onClick={checkClaimStatus} disabled={checkingClaim}>
+              {checkingClaim ? '检查中' : '检查审核结果'}
+            </button>
+          ) : (
+            <button className="button-primary detail-claim-button" type="submit" disabled={verifyingClaim || !claimDescription.trim()}>
+              {verifyingClaim ? '判断中' : '提交描述'}
+            </button>
+          )}
         </form>
       )}
 
@@ -2107,7 +2184,7 @@ function DetailPage({ item, items, comments = [], claimRequests = [], onBack, cl
                 )}
                 <div className="claim-review-actions">
                   <button type="button" className="button-secondary" disabled={reviewingRequestId === request.id} onClick={() => reviewRequest(request.id, 'reject')}>拒绝</button>
-                  <button type="button" className="button-primary" disabled={reviewingRequestId === request.id} onClick={() => reviewRequest(request.id, 'approve')}>通过并归还</button>
+                  <button type="button" className="button-primary" disabled={reviewingRequestId === request.id} onClick={() => reviewRequest(request.id, 'approve')}>允许查看图片</button>
                 </div>
               </div>
             ))}

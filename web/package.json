@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
+    "check": "npm test && npm run build",
+    "test": "node --test",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

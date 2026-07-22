@@ -1,0 +1,173 @@
+import hashlib
+import json
+import struct
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+def parse_timestamp(value: str) -> datetime:
+    text = str(value or "").strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        raise ValueError("sentAt must include a timezone offset")
+    return parsed
+
+
+def image_dimensions(path: Path) -> tuple[int, int] | None:
+    with path.open("rb") as stream:
+        head = stream.read(32)
+        if head.startswith(b"\x89PNG\r\n\x1a\n") and len(head) >= 24:
+            return struct.unpack(">II", head[16:24])
+        if not head.startswith(b"\xff\xd8"):
+            return None
+        stream.seek(2)
+        while True:
+            marker_start = stream.read(1)
+            if not marker_start:
+                return None
+            if marker_start != b"\xff":
+                continue
+            marker = stream.read(1)
+            while marker == b"\xff":
+                marker = stream.read(1)
+            if marker in {b"\xd8", b"\xd9"}:
+                continue
+            length_bytes = stream.read(2)
+            if len(length_bytes) != 2:
+                return None
+            length = struct.unpack(">H", length_bytes)[0]
+            if marker and marker[0] in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+                data = stream.read(5)
+                if len(data) != 5:
+                    return None
+                height, width = struct.unpack(">HH", data[1:5])
+                return width, height
+            stream.seek(max(0, length - 2), 1)
+
+
+def inspect_image(path: Path) -> dict[str, Any]:
+    size = path.stat().st_size
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    dimensions = image_dimensions(path)
+    return {
+        "path": str(path),
+        "name": path.name,
+        "bytes": size,
+        "sha256": digest,
+        "width": dimensions[0] if dimensions else None,
+        "height": dimensions[1] if dimensions else None,
+    }
+
+
+def inspect_loose_directory(directory: Path) -> dict[str, Any]:
+    images = [inspect_image(path) for path in sorted(directory.iterdir()) if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES]
+    return {
+        "format": "loose_images",
+        "importable": bool(images),
+        "autoPublishEligible": False,
+        "forcedRoute": "needs_review",
+        "missingFields": ["messageId", "senderId", "sentAt", "text/location", "image grouping"],
+        "imageCount": len(images),
+        "totalBytes": sum(image["bytes"] for image in images),
+        "images": images,
+    }
+
+
+def read_manifest(path: Path) -> list[dict[str, Any]]:
+    records = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        record["_line"] = line_number
+        records.append(record)
+    return records
+
+
+def validate_manifest_record(record: dict[str, Any], base_dir: Path) -> list[str]:
+    errors = []
+    line = record.get("_line", "?")
+    message_ids = record.get("messageIds") or ([record.get("messageId")] if record.get("messageId") else [])
+    if not message_ids or any(not str(value).strip() for value in message_ids):
+        errors.append(f"line {line}: messageId/messageIds is required")
+    for field in ("groupId", "senderId", "sentAt"):
+        if not str(record.get(field, "")).strip():
+            errors.append(f"line {line}: {field} is required")
+    if record.get("sentAt"):
+        try:
+            parse_timestamp(record["sentAt"])
+        except (TypeError, ValueError) as error:
+            errors.append(f"line {line}: invalid sentAt ({error})")
+    image_paths = record.get("imagePaths") or []
+    if not str(record.get("text", "")).strip() and not image_paths:
+        errors.append(f"line {line}: text or imagePaths is required")
+    for value in image_paths:
+        resolved = (base_dir / str(value)).resolve()
+        if not resolved.is_file():
+            errors.append(f"line {line}: image does not exist: {value}")
+        elif resolved.suffix.lower() not in IMAGE_SUFFIXES:
+            errors.append(f"line {line}: unsupported image type: {value}")
+    return errors
+
+
+def aggregate_manifest_records(records: list[dict[str, Any]], base_dir: Path, window_seconds: int = 45) -> tuple[list[dict[str, Any]], list[str]]:
+    errors = [error for record in records for error in validate_manifest_record(record, base_dir)]
+    if errors:
+        return [], errors
+
+    prepared = []
+    for record in records:
+        prepared.append({
+            "messageIds": [str(value) for value in (record.get("messageIds") or [record["messageId"]])],
+            "groupId": str(record["groupId"]),
+            "groupName": str(record.get("groupName") or "上科大健忘者互助协会"),
+            "senderId": str(record["senderId"]),
+            "textParts": [str(record.get("text") or "").strip()] if str(record.get("text") or "").strip() else [],
+            "imagePaths": [str(value) for value in (record.get("imagePaths") or [])],
+            "sentAt": str(record["sentAt"]),
+            "_timestamp": parse_timestamp(record["sentAt"]),
+        })
+
+    prepared.sort(key=lambda value: value["_timestamp"])
+    batches: list[dict[str, Any]] = []
+    active: dict[tuple[str, str], dict[str, Any]] = {}
+    for message in prepared:
+        key = (message["groupId"], message["senderId"])
+        batch = active.get(key)
+        inactivity = (message["_timestamp"] - batch["_lastTimestamp"]).total_seconds() if batch else None
+        if batch is None or inactivity is None or inactivity < 0 or inactivity > window_seconds:
+            batch = {
+                "messageIds": [],
+                "groupId": message["groupId"],
+                "groupName": message["groupName"],
+                "senderId": message["senderId"],
+                "textParts": [],
+                "imagePaths": [],
+                "sentAt": message["sentAt"],
+                "_lastTimestamp": message["_timestamp"],
+            }
+            active[key] = batch
+            batches.append(batch)
+        batch["messageIds"].extend(message["messageIds"])
+        batch["textParts"].extend(message["textParts"])
+        batch["imagePaths"].extend(message["imagePaths"])
+        batch["_lastTimestamp"] = message["_timestamp"]
+
+    output = []
+    for batch in batches:
+        output.append({
+            "messageIds": list(dict.fromkeys(batch["messageIds"])),
+            "groupId": batch["groupId"],
+            "groupName": batch["groupName"],
+            "senderId": batch["senderId"],
+            "text": "\n".join(batch["textParts"]),
+            "imagePaths": list(dict.fromkeys(batch["imagePaths"])),
+            "sentAt": batch["sentAt"],
+        })
+    return output, []

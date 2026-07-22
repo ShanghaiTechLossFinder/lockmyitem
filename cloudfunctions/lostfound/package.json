@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Unified CloudBase backend for ItemLocker LockMyItem",
   "main": "index.js",
+  "scripts": {
+    "check": "node --check index.js && node --test",
+    "test": "node --test"
+  },
   "dependencies": {
     "lodash.set": "file:vendor/lodash.set",
     "lodash.unset": "file:vendor/lodash.unset",

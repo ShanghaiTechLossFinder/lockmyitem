@@ -26,6 +26,8 @@ Required groups:
 - SMTP credentials when email verification or notification is enabled
 - CloudBase Web access policy or anonymous-login policy for browser calls
 
+QQ ingestion additionally requires `QQ_INGEST_SECRET`, `QQ_ADMIN_SECRET`, `QQ_ALLOWED_GROUP_IDS`, `QQ_REVIEW_OWNER_ACTOR_ID`, `WEB_PUBLIC_BASE_URL`, and an HTTP trigger for `lostfound`. Keep the bot and admin secrets separate and store them only in the relevant process and CloudBase secret storage.
+
 If multiple Hunyuan credential modes are configured, the cloud function prefers Tencent Cloud signed API calls over the OpenAI-compatible endpoint.
 
 ## Deploy
@@ -46,6 +48,8 @@ cloudfunctions/lostfound/config.json
 ```
 
 If the CloudBase console reports `FUNCTIONS_TIME_LIMIT_EXCEEDED`, set the `lostfound` timeout to 30 seconds manually and deploy again.
+
+Before production traffic, deploy the deny-by-default database and storage rules described in `SECURITY_RULES.md`. The JSON files are executable CloudBase rules; keeping them only in Git does not change console permissions.
 
 ## Test classifyImage
 

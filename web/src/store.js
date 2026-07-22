@@ -522,6 +522,10 @@ export async function reviewCloudClaimRequest(requestId, decision) {
   };
 }
 
+export async function getCloudClaimRequestStatus(itemId, requestId) {
+  return callLostfound('getClaimRequestStatus', { itemId, requestId }, 15000);
+}
+
 export async function setCloudReturnStatus(itemId, returned) {
   const data = await callLostfound(returned ? 'markReturned' : 'undoReturned', { itemId }, 15000);
   return {

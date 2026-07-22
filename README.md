@@ -15,7 +15,8 @@
 - `web/`：浏览器与 PWA 前端，包含列表、发布、详情、评论、认领、归还状态、邮箱登录、图片识别入口和桌面安装提示。
 - `cloudfunctions/lostfound/`：CloudBase 后端，提供数据读写、邮箱验证码/登录、评论、认领、归还状态、图片识别和通知邮件。
 - `database.seed.json`：CloudBase 集合初始化数据，主要用于 `campus_locations`。
-- `database.rules.json`：数据库权限建议。
+- `database.rules.json`、`storage.rules.json`：可执行的客户端默认拒绝规则；部署清单见 `SECURITY_RULES.md`。
+- `qq-ingestion/`：腾讯官方 QQ Bot 群消息聚合、幂等入库与历史记录导入工具。
 - `cloudbaserc.json`：CloudBase 云函数部署配置。
 
 旧微信小程序源码已不再作为维护主线保留。它里面仍然有价值的部分已经在 web 端对应落位：
@@ -82,6 +83,11 @@ CloudBase 环境需要以下集合：
 - `notifications`
 - `reports`
 - `campus_locations`
+- `email_login_codes`
+- `classify_rate_limits`
+- `qq_ingest_events`
+- `qq_ingest_drafts`
+- `qq_bot_outbox`
 
 初始化地点数据时，将 `database.seed.json` 中的 `campus_locations` 导入同名集合。
 
@@ -89,7 +95,11 @@ CloudBase 环境需要以下集合：
 
 - 浏览器端不保存模型服务凭据、云服务签名凭据、邮件密码或服务端 token。
 - 图片识别通过 CloudBase 云函数或受保护的后端代理调用模型。
-- 招领文本中的完整卡号、证件号、手机号会自动打码；只有银行卡、身份证、护照、驾驶证、医保卡、社保卡等卡面/证件类图片在认领前隐藏，钱包、钥匙和普通电子产品仍可直接用图片辅助确认。
-- 卡面/证件类认领描述由后端调用混元视觉模型核验；通过后才返回短期令牌给前端展示图片，未通过或不可用时转发布者人工确认。
+- 招领文本中的完整卡号、证件号、手机号会自动打码；证件、校园卡、钱包、手机、AirPods/耳机、电脑、钥匙等敏感或重要招领物品在认领前隐藏原图。
+- 受保护物品的认领描述由后端调用混元模型核验；未自动通过时聚合通知发布者。发布者批准后只授予认领者查看权，还需认领者再次确认才标记完成。
 - 发布地点来自用户手动点选、地点搜索或手动输入，不依赖浏览器定位权限。
 - 浏览器 `localStorage` 只作为离线或云端加载失败时的缓存兜底。
+
+## 自动检查
+
+GitHub Actions 会在 `main` 推送和 Pull Request 上自动执行云函数测试、Web 测试与生产构建、QQ 接入的 Python 测试。该流程不读取生产密钥，真实 CloudBase/QQ/混元联调仍应在受控测试环境进行。
