@@ -27,10 +27,10 @@ python -m venv .venv
 Copy-Item .env.example .env
 ```
 
-把 `.env` 中的值配置到实际进程环境（仓库不会自动加载 `.env`），然后：
+把 `.env` 中的值配置到实际进程环境（仓库不会自动加载 `.env`）。模板后半部分的变量还要配置到 CloudBase `lostfound` 云函数环境；不要把含真实值的 `.env` 或云函数配置提交到 Git。然后：
 
 ```powershell
-python check_config.py --scope bot --env-file .env
+python check_config.py --scope all --env-file .env
 python run_bot.py
 ```
 
