@@ -98,7 +98,9 @@ npm run build
 
 - `web/public/manifest.webmanifest`
 - `web/public/sw.js`
-- `web/public/icon.svg`
+- `web/public/icon-192.png`
+- `web/public/icon-512.png`
+- `web/public/apple-touch-icon.png`
 
 ## 当前网页功能
 
