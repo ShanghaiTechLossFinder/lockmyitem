@@ -445,6 +445,19 @@ export async function verifyClaimDescription(itemId, description) {
   };
 }
 
+export async function searchProtectedItems(query) {
+  const data = await callLostfound('searchProtectedItems', { query }, 65000);
+  return {
+    ...data,
+    matches: Array.isArray(data.matches)
+      ? data.matches.map((match) => ({
+        ...match,
+        item: normalizeItem(match.item || {})
+      }))
+      : []
+  };
+}
+
 export async function claimCloudItem(itemId, currentUser, options = {}) {
   const data = await callLostfound('claimItem', {
     itemId,

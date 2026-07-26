@@ -2,7 +2,15 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isProtectedFoundItem, sanitizeFoundItemPrivacy } = require('../privacy');
+const {
+  isProtectedFoundItem,
+  isSensitiveFoundItem,
+  normalizePrivacySearchInput,
+  privacyDocumentTypeForItem,
+  privacySearchDescription,
+  sanitizeFoundItemPrivacy,
+  validatePrivacySearchInput
+} = require('../privacy');
 
 for (const sample of [
   { category: '校园卡', title: '蓝色校园卡' },
@@ -41,4 +49,46 @@ test('explicit sensitive classification is preserved', () => {
   assert.equal(elevated.sensitivityLevel, 'sensitive');
   const matched = sanitizeFoundItemPrivacy({ type: 'found', title: '银行卡', sensitivityLevel: 'normal' });
   assert.equal(matched.sensitivityLevel, 'sensitive');
+});
+
+test('unified privacy search uses minimal type-specific fields', () => {
+  const bank = normalizePrivacySearchInput({
+    documentType: 'bank_card',
+    name: ' 张三 ',
+    identifierSuffix: ' 12-34 ',
+    organization: ' 上海银行 '
+  });
+  assert.deepEqual(bank, {
+    documentType: 'bank_card',
+    name: '张三',
+    identifierSuffix: '1234',
+    organization: '上海银行',
+    documentLabel: ''
+  });
+  assert.equal(validatePrivacySearchInput(bank), '');
+  assert.match(privacySearchDescription(bank), /卡号后四位：1234/);
+  assert.doesNotMatch(privacySearchDescription(bank), /完整|有效期|安全码/);
+});
+
+test('unified privacy search rejects incomplete or excessive identifiers', () => {
+  assert.equal(
+    validatePrivacySearchInput({ documentType: 'national_id', name: '张三', identifierSuffix: '12' }),
+    '请填写证件号码后 4 位'
+  );
+  const normalized = normalizePrivacySearchInput({
+    documentType: 'national_id',
+    name: '张三',
+    identifierSuffix: '310101199901011234'
+  });
+  assert.equal(normalized.identifierSuffix, '310101199901011234');
+  assert.equal(validatePrivacySearchInput(normalized), '请填写证件号码后 4 位');
+});
+
+test('privacy item type routing distinguishes sensitive documents from important objects', () => {
+  assert.equal(privacyDocumentTypeForItem({ title: '校园一卡通' }), 'campus_card');
+  assert.equal(privacyDocumentTypeForItem({ title: '居民身份证' }), 'national_id');
+  assert.equal(privacyDocumentTypeForItem({ title: '上海银行卡' }), 'bank_card');
+  assert.equal(privacyDocumentTypeForItem({ title: '护照' }), 'other_document');
+  assert.equal(isSensitiveFoundItem({ type: 'found', title: '护照' }), true);
+  assert.equal(isSensitiveFoundItem({ type: 'found', title: '手机', sensitivityLevel: 'important' }), false);
 });

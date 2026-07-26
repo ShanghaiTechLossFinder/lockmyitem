@@ -1,6 +1,33 @@
 const SENSITIVE_CATEGORIES = ['证件', '校园卡'];
 const IMPORTANT_CATEGORIES = ['电子产品', '钥匙'];
 
+export const PRIVACY_DOCUMENT_TYPES = [
+  {
+    value: 'campus_card',
+    label: '校园卡 / 学生证',
+    identifierLabel: '学号后 4 位',
+    identifierHint: '只填写后 4 位，不需要完整学号'
+  },
+  {
+    value: 'national_id',
+    label: '身份证',
+    identifierLabel: '身份证号后 4 位',
+    identifierHint: '不要填写完整身份证号'
+  },
+  {
+    value: 'bank_card',
+    label: '银行卡',
+    identifierLabel: '卡号后 4 位',
+    identifierHint: '不要填写完整卡号、有效期或安全码'
+  },
+  {
+    value: 'other_document',
+    label: '其他证件',
+    identifierLabel: '证件号后 4 位',
+    identifierHint: '只填写后 4 位'
+  }
+];
+
 const SENSITIVE_WORDS = [
   '身份证',
   '护照',
@@ -171,6 +198,14 @@ function hasSensitiveWord(text = '') {
   return SENSITIVE_WORDS.some((word) => text.includes(word));
 }
 
+export function privacyDocumentTypeForItem(item = {}) {
+  const text = sourceText(item).toLowerCase();
+  if (/银行卡|信用卡|借记卡|储蓄卡|bank\s*card/.test(text)) return 'bank_card';
+  if (/身份证|居民身份证|national\s*id/.test(text)) return 'national_id';
+  if (/校园卡|一卡通|饭卡|学生证|工作证|工卡|门禁卡|campus\s*card/.test(text)) return 'campus_card';
+  return 'other_document';
+}
+
 function hasProtectedVisualSurface(item = {}) {
   if (!isFoundItem(item)) return false;
   const text = sourceText(item);
@@ -222,6 +257,14 @@ export function isProtectedFoundItem(item = {}) {
   if (!isFoundItem(item)) return false;
   const level = String(item.sensitivityLevel || '').trim().toLowerCase();
   return level === 'sensitive' || level === 'important' || hasProtectedVisualSurface(item);
+}
+
+export function isSensitiveFoundItem(item = {}) {
+  if (!isFoundItem(item)) return false;
+  const level = String(item.sensitivityLevel || '').trim().toLowerCase();
+  return level === 'sensitive'
+    || SENSITIVE_CATEGORIES.includes(String(item.category || '').trim())
+    || hasSensitiveWord(sourceText(item));
 }
 
 export function privacyPromptLines(itemType = '') {

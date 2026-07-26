@@ -1,6 +1,16 @@
 const cloud = require('wx-server-sdk');
 const crypto = require('crypto');
-const { isProtectedFoundItem, maskSensitiveText, privacyPromptLines, sanitizeFoundItemPrivacy } = require('./privacy');
+const {
+  isProtectedFoundItem,
+  isSensitiveFoundItem,
+  maskSensitiveText,
+  normalizePrivacySearchInput,
+  privacyDocumentTypeForItem,
+  privacyPromptLines,
+  privacySearchDescription,
+  sanitizeFoundItemPrivacy,
+  validatePrivacySearchInput
+} = require('./privacy');
 const {
   CLAIM_REQUEST_STATUS,
   canActorSeeClaimant,
@@ -128,6 +138,15 @@ const CLAIM_CONFIG = {
   userAttemptWindowMs: positiveNumber(process.env.CLAIM_USER_RATE_LIMIT_WINDOW_MS, 60 * 60 * 1000),
   userAttemptCooldownMs: positiveNumber(process.env.CLAIM_USER_RATE_LIMIT_COOLDOWN_MS, 3 * 1000),
   ownerNotificationCooldownMs: positiveNumber(process.env.CLAIM_OWNER_NOTIFICATION_COOLDOWN_MS, 10 * 60 * 1000)
+};
+
+const PRIVACY_SEARCH_CONFIG = {
+  maxCandidates: positiveNumber(process.env.PRIVACY_SEARCH_MAX_CANDIDATES, 24),
+  maxMatches: positiveNumber(process.env.PRIVACY_SEARCH_MAX_MATCHES, 6),
+  concurrency: positiveNumber(process.env.PRIVACY_SEARCH_CONCURRENCY, 6),
+  maxRequests: positiveNumber(process.env.PRIVACY_SEARCH_RATE_LIMIT_MAX, 6),
+  windowMs: positiveNumber(process.env.PRIVACY_SEARCH_RATE_LIMIT_WINDOW_MS, 60 * 60 * 1000),
+  cooldownMs: positiveNumber(process.env.PRIVACY_SEARCH_RATE_LIMIT_COOLDOWN_MS, 20 * 1000)
 };
 
 const QQ_REVIEW_OWNER = resolveQQReviewOwner({
@@ -2062,6 +2081,89 @@ async function verifyClaimDescriptionWithModel(item = {}, description = '') {
   };
 }
 
+async function mapInPrivacySearchBatches(values = [], mapper) {
+  const results = [];
+  const size = Math.max(1, Math.floor(PRIVACY_SEARCH_CONFIG.concurrency));
+  for (let index = 0; index < values.length; index += size) {
+    const batch = values.slice(index, index + size);
+    const batchResults = await Promise.all(batch.map(mapper));
+    results.push(...batchResults);
+  }
+  return results;
+}
+
+async function searchProtectedItems(event) {
+  const actor = requireVerifiedActor(event);
+  if (actor.error) return actor.error;
+  if (!HUNYUAN_CONFIG.apiKey && !(HUNYUAN_CONFIG.secretId && HUNYUAN_CONFIG.secretKey)) {
+    return fail('隐私匹配服务暂不可用，请稍后再试', 'MODEL_NOT_CONFIGURED');
+  }
+
+  const query = normalizePrivacySearchInput(event.query || {});
+  const queryError = validatePrivacySearchInput(query);
+  if (queryError) return fail(queryError, 'INVALID_PRIVACY_SEARCH');
+
+  const rateError = await checkPersistentActionRateLimit({
+    namespace: 'privacy-search',
+    identity: actor.actorId,
+    maxRequests: PRIVACY_SEARCH_CONFIG.maxRequests,
+    windowMs: PRIVACY_SEARCH_CONFIG.windowMs,
+    minIntervalMs: PRIVACY_SEARCH_CONFIG.cooldownMs,
+    message: '隐私物品查询过于频繁'
+  });
+  if (rateError) return rateError;
+
+  const result = await db.collection(COLLECTIONS.items)
+    .where({ type: 'found', status: 'active' })
+    .orderBy('createdAt', 'desc')
+    .limit(100)
+    .get();
+  const candidates = (result.data || [])
+    .map((item) => sanitizeFoundItemPrivacy(item))
+    .filter((item) => (
+      item.ownerOpenid !== actor.actorId
+      && isSensitiveFoundItem(item)
+      && privacyDocumentTypeForItem(item) === query.documentType
+    ))
+    .slice(0, PRIVACY_SEARCH_CONFIG.maxCandidates);
+
+  if (!candidates.length) {
+    return ok({
+      matches: [],
+      checkedCount: 0,
+      message: '暂未发现同类型的隐私物品招领记录'
+    });
+  }
+
+  const hydratedCandidates = await hydrateItemImages(candidates);
+  const description = privacySearchDescription(query);
+  const decisions = await mapInPrivacySearchBatches(hydratedCandidates, async (item) => {
+    try {
+      const modelDecision = await verifyClaimDescriptionWithModel(item, description);
+      return { item, modelDecision };
+    } catch {
+      return { item, modelDecision: normalizeClaimModelDecision({}, '本条记录暂时无法核验') };
+    }
+  });
+  const matches = decisions
+    .filter(({ modelDecision }) => claimDecisionAllowsToken(modelDecision))
+    .slice(0, PRIVACY_SEARCH_CONFIG.maxMatches)
+    .map(({ item }) => ({
+      item: sanitizeItemForViewer(item, {}, actor.actorId),
+      claimToken: createClaimToken(item._id || item.id, actor.actorId),
+      expiresInSeconds: Math.floor(CLAIM_CONFIG.tokenTtlMs / 1000),
+      matchReason: '证件类型、姓名与号码后四位均与卡面信息相符'
+    }));
+
+  return ok({
+    matches,
+    checkedCount: candidates.length,
+    message: matches.length
+      ? `找到 ${matches.length} 条与你的信息相符的招领记录`
+      : '当前记录中未找到完全匹配的信息'
+  });
+}
+
 async function getLatestClaimRequest(itemId, claimantOpenid) {
   const ready = await ensureClaimRequestCollection();
   if (!ready) return null;
@@ -3125,12 +3227,15 @@ async function getItemDetail(event) {
     .get();
   const items = await hydrateItemImages([item.data]);
   const visibleItem = sanitizeItemForViewer(items[0], event, actorId);
+  const sensitiveItem = isSensitiveFoundItem(sanitizeFoundItemPrivacy(items[0]));
   const claimRequests = itemBelongsToActor(items[0], actorId) && isProtectedFoundItem(sanitizeFoundItemPrivacy(items[0]))
     ? await listPendingClaimRequests(event.itemId)
     : [];
   return ok({
     item: visibleItem,
-    comments: sanitizeCommentsForViewer(comments.data, canSeeClaimantInfo(items[0], actorId)),
+    comments: sensitiveItem
+      ? []
+      : sanitizeCommentsForViewer(comments.data, canSeeClaimantInfo(items[0], actorId)),
     claimRequests
   });
 }
@@ -3143,6 +3248,9 @@ async function createComment(event, context) {
   if (BAD_WORDS.some((word) => content.includes(word))) return fail('评论包含敏感词');
   const itemResult = await db.collection(COLLECTIONS.items).doc(event.itemId).get();
   const item = itemResult.data;
+  if (isSensitiveFoundItem(sanitizeFoundItemPrivacy(item))) {
+    return fail('隐私物品已关闭公开评论，请使用身份验证流程', 'COMMENTS_DISABLED_FOR_PRIVACY');
+  }
   const data = {
     itemId: event.itemId,
     authorOpenid: actor.actorId,
@@ -3310,6 +3418,8 @@ exports.main = async (event = {}) => {
         return await createComment(event, context);
       case 'verifyClaimDescription':
         return await verifyClaimDescription(event, context);
+      case 'searchProtectedItems':
+        return await searchProtectedItems(event);
       case 'reviewClaimRequest':
         return await reviewClaimRequest(event, context);
       case 'getClaimRequestStatus':

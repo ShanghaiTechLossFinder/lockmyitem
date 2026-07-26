@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, LockKeyhole, Search, ShieldCheck } from 'lucide-react';
 import { campusMapImage, campusMapImageBoundaries, campusMapMeta, categories, locationAliases, locations } from './data.js';
 import {
   claimCloudItem,
@@ -21,12 +21,20 @@ import {
   reviewCloudClaimRequest,
   saveItems,
   saveUser,
+  searchProtectedItems,
   sendEmailCode,
   setCloudReturnStatus,
   updateUserNickname,
   verifyClaimDescription
 } from './store.js';
-import { isProtectedFoundItem, sanitizeFoundItemPrivacy, sensitivityBadgeText } from './privacy.js';
+import {
+  isProtectedFoundItem,
+  isSensitiveFoundItem,
+  PRIVACY_DOCUMENT_TYPES,
+  privacyDocumentTypeForItem,
+  sanitizeFoundItemPrivacy,
+  sensitivityBadgeText
+} from './privacy.js';
 import { classifyByText, findPotentialMatches, formatDate, getLocation, semanticSearchItems } from './utils.js';
 import { recognizeImageFile } from './vision.js';
 import campusBoardImage from './assets/notice/campus-board.jpg';
@@ -52,6 +60,13 @@ const LOCATION_DETAIL_HINT = '可补充入口、楼层、靠窗/靠路侧、附�
 const VIEW_STORAGE_KEY = 'lockmyitem_web_last_view';
 const SAVED_VIEWS = ['found', 'lost', 'returned', 'me'];
 const CLAIM_ACCESS_STORAGE_PREFIX = 'lockmyitem_claim_access_v1';
+const EMPTY_PRIVACY_SEARCH_QUERY = {
+  documentType: 'campus_card',
+  name: '',
+  identifierSuffix: '',
+  organization: '',
+  documentLabel: ''
+};
 
 function loadSavedView() {
   if (typeof window === 'undefined') return 'found';
@@ -292,6 +307,11 @@ function App() {
   const [commentsByItem, setCommentsByItem] = useState({});
   const [claimRequestsByItem, setClaimRequestsByItem] = useState({});
   const [claimAccessByItem, setClaimAccessByItem] = useState({});
+  const [privacySearchState, setPrivacySearchState] = useState({
+    query: EMPTY_PRIVACY_SEARCH_QUERY,
+    result: null,
+    error: ''
+  });
   const [syncing, setSyncing] = useState(false);
   const [claimingItemId, setClaimingItemId] = useState(null);
   const [toast, setToast] = useState('');
@@ -480,6 +500,27 @@ function App() {
     setView(key);
   }
 
+  function openPrivacySearch(item = null) {
+    const documentType = item ? privacyDocumentTypeForItem(item) : privacySearchState.query.documentType;
+    setPrivacySearchState((current) => ({
+      ...current,
+      query: {
+        ...current.query,
+        documentType: documentType || 'campus_card'
+      },
+      error: ''
+    }));
+    setView('privacy-search');
+  }
+
+  function backFromPrivacySearch() {
+    if (selectedItem) {
+      setView('detail');
+      return;
+    }
+    openTab('found');
+  }
+
   function requireAuth(actionLabel, onAuthed, onCancel) {
     if (currentUser) {
       onAuthed(currentUser);
@@ -558,7 +599,52 @@ function App() {
       window.requestAnimationFrame(() => window.scrollTo({ top: scrollY }));
       return;
     }
+    if (detailReturnTarget?.view === 'privacy-search') {
+      setSelectedId(null);
+      setDetailReturnTarget(null);
+      setView('privacy-search');
+      return;
+    }
     openTab(selectedItem.status === 'returned' ? 'returned' : selectedItem.type);
+  }
+
+  async function runPrivacySearch(query) {
+    return runWithAuth('验证隐私物品', async (user) => {
+      try {
+        const result = await searchProtectedItems(query);
+        const accessUpdates = {};
+        const expiresAtFallback = Date.now() + 10 * 60 * 1000;
+        for (const match of result.matches || []) {
+          const itemId = match.item?.id;
+          if (!itemId || !match.claimToken) continue;
+          const access = {
+            claimToken: match.claimToken,
+            expiresAt: Date.now() + (Number(match.expiresInSeconds) || 600) * 1000,
+            verifiedAt: new Date().toISOString(),
+            verificationSource: 'privacy-search'
+          };
+          if (!Number.isFinite(access.expiresAt)) access.expiresAt = expiresAtFallback;
+          writeStoredClaimAccess(itemId, user, currentClientId, access);
+          accessUpdates[itemId] = access;
+        }
+        if (Object.keys(accessUpdates).length) {
+          setClaimAccessByItem((current) => ({ ...current, ...accessUpdates }));
+        }
+        setPrivacySearchState({ query, result, error: '' });
+        return result;
+      } catch (error) {
+        const message = cloudErrorMessage(error);
+        setPrivacySearchState({ query, result: null, error: message });
+        throw error;
+      }
+    });
+  }
+
+  function openPrivacySearchMatch(itemId) {
+    if (!itemId) return;
+    setSelectedId(itemId);
+    setDetailReturnTarget({ view: 'privacy-search' });
+    setView('detail');
   }
 
   async function publishItem(payload) {
@@ -931,6 +1017,10 @@ function App() {
           total={stats.found}
           onPublish={() => openPublish('found')}
           onOpen={openDetail}
+          onOpenPrivacySearch={() => {
+            setSelectedId(null);
+            openPrivacySearch();
+          }}
           onInstallDesktop={installDesktopApp}
         />
       )}
@@ -983,6 +1073,16 @@ function App() {
         />
       )}
 
+      {view === 'privacy-search' && (
+        <PrivacySearchPage
+          state={privacySearchState}
+          onStateChange={setPrivacySearchState}
+          onBack={backFromPrivacySearch}
+          onSearch={runPrivacySearch}
+          onOpenMatch={openPrivacySearchMatch}
+        />
+      )}
+
       {view === 'detail' && selectedItem && (
         <DetailPage
           item={selectedItem}
@@ -996,6 +1096,7 @@ function App() {
           isOwnItem={itemBelongsToCurrentUser(selectedItem, currentUser, currentClientId)}
           onClaim={() => submitClaim(selectedItem)}
           onVerifyClaim={(description) => verifyClaimForItem(selectedItem, description)}
+          onOpenPrivacySearch={() => openPrivacySearch(selectedItem)}
           onCheckClaim={() => checkClaimRequestForItem(selectedItem)}
           onReviewClaim={reviewClaimForItem}
           onMarkReturned={() => markReturned(selectedItem.id)}
@@ -1030,7 +1131,16 @@ function App() {
   );
 }
 
-function FoundPage({ items, activeCategory, setActiveCategory, total, onPublish, onOpen, onInstallDesktop }) {
+function FoundPage({
+  items,
+  activeCategory,
+  setActiveCategory,
+  total,
+  onPublish,
+  onOpen,
+  onOpenPrivacySearch,
+  onInstallDesktop
+}) {
   const [semanticQuery, setSemanticQuery] = useState('');
   const baseList = filterItems(items, 'found', 'active', activeCategory);
   const list = semanticSearchItems(baseList, semanticQuery);
@@ -1051,6 +1161,17 @@ function FoundPage({ items, activeCategory, setActiveCategory, total, onPublish,
           <span className="notice-subtitle">如遇失物，请及时发布招领信息</span>
         </div>
         <img className="notice-image" src={campusBoardImage} alt="" />
+      </button>
+
+      <button className="privacy-search-entry" type="button" onClick={onOpenPrivacySearch}>
+        <span className="privacy-search-entry-icon" aria-hidden="true">
+          <ShieldCheck size={21} strokeWidth={2.2} />
+        </span>
+        <span className="privacy-search-entry-copy">
+          <strong>丢了证件或卡片？</strong>
+          <span>填写一次信息，统一检查所有隐私物品</span>
+        </span>
+        <span className="privacy-search-entry-action">开始查找</span>
       </button>
 
       <SemanticSearchBox
@@ -1075,6 +1196,213 @@ function FoundPage({ items, activeCategory, setActiveCategory, total, onPublish,
         <div className="empty">{semanticQuery.trim() ? '没有匹配的招领信息' : '暂时没有招领信息'}</div>
       ) : (
         <FeedPanel items={list} allItems={items} kind="found" onOpen={onOpen} />
+      )}
+    </section>
+  );
+}
+
+function PrivacySearchPage({ state, onStateChange, onBack, onSearch, onOpenMatch }) {
+  const [searching, setSearching] = useState(false);
+  const [localError, setLocalError] = useState('');
+  const query = state.query || EMPTY_PRIVACY_SEARCH_QUERY;
+  const result = state.result;
+  const selectedType = PRIVACY_DOCUMENT_TYPES.find((entry) => entry.value === query.documentType)
+    || PRIVACY_DOCUMENT_TYPES[0];
+
+  function update(field, value) {
+    onStateChange((current) => ({
+      ...current,
+      query: { ...current.query, [field]: value },
+      result: null,
+      error: ''
+    }));
+    setLocalError('');
+  }
+
+  function changeDocumentType(value) {
+    onStateChange((current) => ({
+      query: {
+        ...current.query,
+        documentType: value,
+        identifierSuffix: '',
+        organization: '',
+        documentLabel: ''
+      },
+      result: null,
+      error: ''
+    }));
+    setLocalError('');
+  }
+
+  function validate() {
+    if (query.name.trim().length < 2) return '请填写证件上的姓名';
+    if (!/^[A-Za-z0-9]{4}$/.test(query.identifierSuffix.trim())) {
+      return `请填写${selectedType.identifierLabel}`;
+    }
+    if (query.documentType === 'bank_card' && query.organization.trim().length < 2) {
+      return '请填写发卡银行名称';
+    }
+    if (query.documentType === 'other_document' && query.documentLabel.trim().length < 2) {
+      return '请填写证件名称';
+    }
+    return '';
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    const validationError = validate();
+    if (validationError) {
+      setLocalError(validationError);
+      return;
+    }
+    setSearching(true);
+    setLocalError('');
+    try {
+      await onSearch({
+        ...query,
+        name: query.name.trim(),
+        identifierSuffix: query.identifierSuffix.trim().toUpperCase(),
+        organization: query.organization.trim(),
+        documentLabel: query.documentLabel.trim()
+      });
+    } catch {
+      // App stores the user-facing cloud error in state.
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  return (
+    <section className="page privacy-search-page">
+      <button className="back-button" type="button" onClick={onBack}>返回</button>
+
+      <div className="privacy-search-hero">
+        <span className="privacy-search-hero-icon" aria-hidden="true">
+          <LockKeyhole size={24} strokeWidth={2.1} />
+        </span>
+        <div>
+          <h1>查找我的隐私物品</h1>
+          <p>填写一次验证信息，系统会统一检查同类型的全部招领记录。</p>
+        </div>
+      </div>
+
+      <form className="privacy-search-form" onSubmit={submit}>
+        <fieldset className="privacy-type-fieldset">
+          <legend>证件类型</legend>
+          <div className="privacy-type-options">
+            {PRIVACY_DOCUMENT_TYPES.map((entry) => (
+              <button
+                key={entry.value}
+                type="button"
+                className={query.documentType === entry.value ? 'active' : ''}
+                aria-pressed={query.documentType === entry.value}
+                onClick={() => changeDocumentType(entry.value)}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+
+        {query.documentType === 'other_document' && (
+          <label className="privacy-search-field">
+            <span>证件名称</span>
+            <input
+              value={query.documentLabel}
+              maxLength={30}
+              placeholder="例如：护照、驾驶证、工作证"
+              onChange={(event) => update('documentLabel', event.target.value)}
+            />
+          </label>
+        )}
+
+        {query.documentType === 'bank_card' && (
+          <label className="privacy-search-field">
+            <span>发卡银行</span>
+            <input
+              value={query.organization}
+              maxLength={40}
+              placeholder="例如：上海银行"
+              onChange={(event) => update('organization', event.target.value)}
+            />
+          </label>
+        )}
+
+        <label className="privacy-search-field">
+          <span>证件上的姓名</span>
+          <input
+            value={query.name}
+            maxLength={30}
+            autoComplete="name"
+            placeholder="仅用于本次后台比对"
+            onChange={(event) => update('name', event.target.value)}
+          />
+        </label>
+
+        <label className="privacy-search-field">
+          <span>{selectedType.identifierLabel}</span>
+          <input
+            value={query.identifierSuffix}
+            maxLength={4}
+            autoCapitalize="characters"
+            autoComplete="off"
+            placeholder="4 位数字或字母"
+            onChange={(event) => update(
+              'identifierSuffix',
+              event.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 4)
+            )}
+          />
+          <small>{selectedType.identifierHint}</small>
+        </label>
+
+        <div className="privacy-search-assurance">
+          <ShieldCheck size={18} strokeWidth={2.1} aria-hidden="true" />
+          <span>不会公开姓名和号码；查询内容不写入评论，也不保存为公开资料。</span>
+        </div>
+
+        {(localError || state.error) && (
+          <div className="privacy-search-error" role="alert">{localError || state.error}</div>
+        )}
+
+        <button className="button-primary privacy-search-submit" type="submit" disabled={searching}>
+          <Search size={19} strokeWidth={2.2} aria-hidden="true" />
+          <span>{searching ? '正在统一检查…' : '验证并统一查找'}</span>
+        </button>
+      </form>
+
+      {result && (
+        <section className="privacy-search-results" aria-live="polite">
+          <div className="privacy-search-results-head">
+            <div>
+              <h2>{result.matches?.length ? `找到 ${result.matches.length} 条匹配` : '暂未找到匹配'}</h2>
+              <p>{result.message}</p>
+            </div>
+            <span>{result.checkedCount || 0} 条已检查</span>
+          </div>
+
+          {result.matches?.length ? (
+            <div className="privacy-match-list">
+              {result.matches.map((match) => (
+                <button
+                  key={match.item.id}
+                  className="privacy-match-row"
+                  type="button"
+                  onClick={() => onOpenMatch(match.item.id)}
+                >
+                  <span>
+                    <strong>{match.item.title || '一件隐私物品'}</strong>
+                    <small>{[locationText(match.item), formatDate(match.item.createdAt)].filter(Boolean).join(' · ')}</small>
+                  </span>
+                  <span>查看并确认</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="privacy-search-empty">
+              当前没有完全匹配的记录。隐私物品不会按姓名单独返回结果，可稍后再次查询或联系校园服务中心。
+            </div>
+          )}
+        </section>
       )}
     </section>
   );
@@ -2179,7 +2507,24 @@ function AuthModal({ actionLabel, onClose, onSubmit, onSendCode }) {
   );
 }
 
-function DetailPage({ item, items, comments = [], claimRequests = [], claimAccess = {}, onBack, claiming = false, currentUser, isOwnItem = false, onClaim, onVerifyClaim, onCheckClaim, onReviewClaim, onComment, onOpenMatch }) {
+function DetailPage({
+  item,
+  items,
+  comments = [],
+  claimRequests = [],
+  claimAccess = {},
+  onBack,
+  claiming = false,
+  currentUser,
+  isOwnItem = false,
+  onClaim,
+  onVerifyClaim,
+  onOpenPrivacySearch,
+  onCheckClaim,
+  onReviewClaim,
+  onComment,
+  onOpenMatch
+}) {
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [claimDescription, setClaimDescription] = useState('');
@@ -2190,7 +2535,8 @@ function DetailPage({ item, items, comments = [], claimRequests = [], claimAcces
   const matches = findPotentialMatches(item, items);
   const canSeeClaimant = currentUserCanSeeClaimant(item, currentUser);
   const claimant = claimantText(item, canSeeClaimant);
-  const visibleComments = comments;
+  const sensitiveClaim = isSensitiveFoundItem(item);
+  const visibleComments = sensitiveClaim ? [] : comments;
   const protectedClaim = isProtectedFoundItem(item);
   const imageLocked = protectedClaim && item.claimImageLocked && !isOwnItem;
   const statusLabel = item.status === 'returned'
@@ -2264,7 +2610,11 @@ function DetailPage({ item, items, comments = [], claimRequests = [], claimAcces
         {imageLocked ? (
           <span className="protected-image-placeholder">
             <strong>{item.category || '敏感卡面'}</strong>
-            <span>先提交可验证特征，通过后查看图片确认</span>
+            <span>
+              {sensitiveClaim
+                ? '照片和证件内容已隐藏，验证后才能查看'
+                : '先提交可验证特征，通过后查看图片确认'}
+            </span>
           </span>
         ) : (
           item.image ? <img src={item.image} alt="" /> : <span>{item.category}</span>
@@ -2311,11 +2661,38 @@ function DetailPage({ item, items, comments = [], claimRequests = [], claimAcces
         )}
       </div>
 
-      {item.type === 'found' && item.status === 'active' && imageLocked && (
+      {item.type === 'found' && item.status === 'active' && imageLocked && sensitiveClaim && !claimAccess.requestId && (
+        <div className="privacy-claim-panel">
+          <div className="privacy-claim-panel-head">
+            <span className="privacy-claim-panel-icon" aria-hidden="true">
+              <LockKeyhole size={20} strokeWidth={2.1} />
+            </span>
+            <div>
+              <strong>隐私物品保护</strong>
+              <span>照片和证件内容已隐藏</span>
+            </div>
+            <span className="privacy-claim-status">待验证</span>
+          </div>
+          <p>填写一次验证信息，系统会统一检查校园卡、身份证、银行卡及其他证件招领记录。</p>
+          <button className="button-primary detail-claim-button" type="button" onClick={onOpenPrivacySearch}>
+            验证信息并统一查找
+          </button>
+          <span className="privacy-claim-footnote">
+            <ShieldCheck size={15} strokeWidth={2.1} aria-hidden="true" />
+            不要求完整身份证号或银行卡号
+          </span>
+        </div>
+      )}
+
+      {item.type === 'found' && item.status === 'active' && imageLocked && (!sensitiveClaim || claimAccess.requestId) && (
         <form className="claim-verify-card" onSubmit={submitClaimDescription}>
           <span className="section-kicker">认领前确认</span>
-          <strong>请先描述物品特征</strong>
-          <p>可以填写卡号、姓名、学号等可核验信息；系统仅用于后端匹配并脱敏处理，不会公开展示。不要只写“我的卡”“是我的”。</p>
+          <strong>{sensitiveClaim ? '等待发布者确认' : '请先描述物品特征'}</strong>
+          <p>
+            {sensitiveClaim
+              ? '你之前提交的认领信息仍然有效。发布者通过后，可以查看图片并确认认领。'
+              : '描述颜色、外观、卡套、标志或使用痕迹等可核验信息。不要只写“我的”“是我的”。'}
+          </p>
           {claimAccess.requestId ? (
             <p>描述已提交。发布者通过后，你可以先查看图片，再自行确认是否认领。</p>
           ) : (
@@ -2394,30 +2771,42 @@ function DetailPage({ item, items, comments = [], claimRequests = [], claimAcces
         </>
       )}
 
-      <h2 className="section-title">评论</h2>
-      {visibleComments.length === 0 ? (
-        <div className="empty small">还没有评论</div>
-      ) : (
-        <div className="comment-list">
-          {visibleComments.map((comment) => (
-            <div className="comment-card" key={comment.id}>
-              <div className="comment-head">
-                <strong>{comment.authorName}</strong>
-                <span>{formatDate(comment.createdAt)}</span>
-              </div>
-              <p>{comment.content}</p>
-            </div>
-          ))}
+      {sensitiveClaim ? (
+        <div className="privacy-comments-locked">
+          <LockKeyhole size={18} strokeWidth={2.1} aria-hidden="true" />
+          <div>
+            <strong>此物品已关闭公开评论</strong>
+            <span>姓名、证件号和领取信息请只通过上方验证流程提交。</span>
+          </div>
         </div>
+      ) : (
+        <>
+          <h2 className="section-title">评论</h2>
+          {visibleComments.length === 0 ? (
+            <div className="empty small">还没有评论</div>
+          ) : (
+            <div className="comment-list">
+              {visibleComments.map((comment) => (
+                <div className="comment-card" key={comment.id}>
+                  <div className="comment-head">
+                    <strong>{comment.authorName}</strong>
+                    <span>{formatDate(comment.createdAt)}</span>
+                  </div>
+                  <p>{comment.content}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          <form className="comment-box" onSubmit={submitComment}>
+            <input
+              value={commentText}
+              placeholder="写下线索或领取信息"
+              onChange={(event) => setCommentText(event.target.value)}
+            />
+            <button type="submit" disabled={submittingComment}>{submittingComment ? '发送中' : '发送'}</button>
+          </form>
+        </>
       )}
-      <form className="comment-box" onSubmit={submitComment}>
-        <input
-          value={commentText}
-          placeholder="写下线索或领取信息"
-          onChange={(event) => setCommentText(event.target.value)}
-        />
-        <button type="submit" disabled={submittingComment}>{submittingComment ? '发送中' : '发送'}</button>
-      </form>
     </section>
   );
 }

@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isProtectedFoundItem, sanitizeFoundItemPrivacy, sensitivityBadgeText } from '../src/privacy.js';
+import {
+  isProtectedFoundItem,
+  isSensitiveFoundItem,
+  privacyDocumentTypeForItem,
+  sanitizeFoundItemPrivacy,
+  sensitivityBadgeText
+} from '../src/privacy.js';
 
 test('web privacy policy protects only cards and identity documents', () => {
   for (const title of ['校园卡', '上海银行卡', '身份证']) {
@@ -29,4 +35,17 @@ test('web policy keeps explicit sensitive classification', () => {
   const item = sanitizeFoundItemPrivacy({ type: 'found', title: '未命名物品', sensitivityLevel: 'sensitive' });
   assert.equal(item.sensitivityLevel, 'sensitive');
   assert.equal(isProtectedFoundItem(item), true);
+});
+
+test('unified privacy search routes cards and documents without affecting valuables', () => {
+  assert.equal(privacyDocumentTypeForItem({ title: '上海银行借记卡' }), 'bank_card');
+  assert.equal(privacyDocumentTypeForItem({ title: '居民身份证' }), 'national_id');
+  assert.equal(privacyDocumentTypeForItem({ title: '上科大校园卡' }), 'campus_card');
+  assert.equal(privacyDocumentTypeForItem({ title: '护照' }), 'other_document');
+
+  const document = sanitizeFoundItemPrivacy({ type: 'found', title: '身份证', category: '证件' });
+  const phone = sanitizeFoundItemPrivacy({ type: 'found', title: '手机', category: '电子产品' });
+  assert.equal(isSensitiveFoundItem(document), true);
+  assert.equal(isSensitiveFoundItem(phone), false);
+  assert.equal(isProtectedFoundItem(phone), true);
 });
