@@ -5,6 +5,7 @@ const TCB_ENABLED = import.meta.env.VITE_DISABLE_TCB_HUNYUAN !== 'true' && cloud
 const REMOTE_MODEL_ENDPOINT = import.meta.env.VITE_MODEL_API_URL || import.meta.env.VITE_HUNYUAN_API_URL || '';
 const REMOTE_MODEL_FALLBACK_ENABLED = import.meta.env.VITE_ENABLE_MODEL_API_FALLBACK === 'true';
 const CLIENT_ID_KEY = 'lockmyitem_web_client_id';
+const CLOUDBASE_CLASSIFY_TIMEOUT_MS = 55000;
 
 function unique(values = []) {
   return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
@@ -172,8 +173,8 @@ async function classifyViaCloudbase(imageDataUrl, hint, options = {}) {
         itemType: options.itemType || ''
       }
     }),
-    30000,
-    '调用 CloudBase 云函数混元识别超时'
+    CLOUDBASE_CLASSIFY_TIMEOUT_MS,
+    '图片识别耗时较长，请重试或先手动填写'
   );
   const body = unwrapCloudFunctionResponse(response);
   if (!body.ok) {

@@ -101,7 +101,8 @@ const CLASSIFY_LIMITS = {
   maxImageBytes: positiveNumber(process.env.CLASSIFY_MAX_IMAGE_BYTES, 4 * 1024 * 1024),
   maxImageUrlLength: positiveNumber(process.env.CLASSIFY_MAX_IMAGE_URL_LENGTH, 2048),
   maxRequests: positiveNumber(process.env.CLASSIFY_RATE_LIMIT_MAX, 20),
-  windowMs: positiveNumber(process.env.CLASSIFY_RATE_LIMIT_WINDOW_MS, 10 * 60 * 1000)
+  windowMs: positiveNumber(process.env.CLASSIFY_RATE_LIMIT_WINDOW_MS, 10 * 60 * 1000),
+  modelTimeoutMs: Math.min(45000, positiveNumber(process.env.CLASSIFY_MODEL_TIMEOUT_MS, 45000))
 };
 
 const AUTH_CONFIG = {
@@ -1084,7 +1085,13 @@ function normalizeModelImageUrls(imageUrl = '', imageUrls = []) {
   return unique([...(Array.isArray(imageUrls) ? imageUrls : []), imageUrl]).filter(Boolean).slice(0, 6);
 }
 
-async function callOpenAICompatibleHunyuanVisionJson({ imageUrl, imageUrls = [], prompt, temperature = 0.2 }) {
+async function callOpenAICompatibleHunyuanVisionJson({
+  imageUrl,
+  imageUrls = [],
+  prompt,
+  temperature = 0.2,
+  timeoutMs = 30000
+}) {
   const fetchClient = getFetch();
   const endpoint = `${HUNYUAN_CONFIG.baseUrl}/chat/completions`;
   const modelImages = normalizeModelImageUrls(imageUrl, imageUrls);
@@ -1108,7 +1115,7 @@ async function callOpenAICompatibleHunyuanVisionJson({ imageUrl, imageUrls = [],
       ],
       temperature
     }),
-    timeout: 30000
+    timeout: positiveNumber(timeoutMs, 30000)
   });
 
   const data = await response.json().catch(() => ({}));
@@ -1120,7 +1127,13 @@ async function callOpenAICompatibleHunyuanVisionJson({ imageUrl, imageUrls = [],
   return parseJsonContent(content || '');
 }
 
-async function callTencentCloudHunyuanVisionJson({ imageUrl, imageUrls = [], prompt, temperature = 0.2 }) {
+async function callTencentCloudHunyuanVisionJson({
+  imageUrl,
+  imageUrls = [],
+  prompt,
+  temperature = 0.2,
+  timeoutMs = 30000
+}) {
   const fetchClient = getFetch();
   const endpointHost = new URL(HUNYUAN_CONFIG.tencentEndpoint).host;
   const modelImages = normalizeModelImageUrls(imageUrl, imageUrls);
@@ -1154,7 +1167,7 @@ async function callTencentCloudHunyuanVisionJson({ imageUrl, imageUrls = [], pro
     method: 'POST',
     headers,
     body: payloadText,
-    timeout: 30000
+    timeout: positiveNumber(timeoutMs, 30000)
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || (data.Response && data.Response.Error)) {
@@ -1179,7 +1192,8 @@ async function callOpenAICompatibleHunyuanVision(payload) {
   const raw = await callOpenAICompatibleHunyuanVisionJson({
     imageUrl: payload.imageUrl,
     prompt,
-    temperature: 0.2
+    temperature: 0.2,
+    timeoutMs: payload.timeoutMs
   });
   return normalizeHunyuanResult(raw);
 }
@@ -1189,7 +1203,8 @@ async function callTencentCloudHunyuanVision(payload) {
   const raw = await callTencentCloudHunyuanVisionJson({
     imageUrl: payload.imageUrl,
     prompt,
-    temperature: 0.2
+    temperature: 0.2,
+    timeoutMs: payload.timeoutMs
   });
   return normalizeHunyuanResult(raw);
 }
@@ -2609,7 +2624,8 @@ async function classifyImage(event, context) {
     fileId: event.fileId || '',
     hint: event.hint || '',
     purpose: event.purpose || 'item',
-    itemType: event.itemType || event.type || ''
+    itemType: event.itemType || event.type || '',
+    timeoutMs: CLASSIFY_LIMITS.modelTimeoutMs
   };
   let semantic;
   try {
