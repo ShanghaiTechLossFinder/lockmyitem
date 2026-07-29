@@ -25,7 +25,7 @@ export default function CampusLocationMap({ selectedId, onSelect }) {
 
   return (
     <div className="campus-map-shell">
-      <img className="campus-map-image" src={campusMapImage} alt="" loading="eager" decoding="async" />
+      <img className="campus-map-image" src={campusMapImage} alt="" loading="eager" decoding="async" fetchPriority="high" />
       <svg className="campus-map" viewBox={`0 0 ${CAMPUS_MAP_VIEW_WIDTH} ${CAMPUS_MAP_VIEW_HEIGHT}`} role="img" aria-label="上海科技大学校内地点地图" onClick={handleMapClick}>
         {campusMapImageBoundaries.map((boundary) => (
           <polygon

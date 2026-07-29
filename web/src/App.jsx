@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { LockKeyhole, Search, ShieldCheck } from 'lucide-react';
 import { locationAliases, locations } from './data.js';
 import {
@@ -38,7 +38,9 @@ import {
 import { findPotentialMatches, formatDate, semanticSearchItems } from './utils.js';
 import CategoryBar from './components/CategoryBar.jsx';
 import SensitivityBadge from './components/SensitivityBadge.jsx';
+import PublishPage from './pages/PublishPage.jsx';
 import campusBoardImage from './assets/notice/campus-board.jpg';
+import campusMapImage from './assets/map/shanghaitech-campus-map-3d.jpg';
 import doneIcon from './assets/tabbar/done.png';
 import doneActiveIcon from './assets/tabbar/done-active.png';
 import foundIcon from './assets/tabbar/found.png';
@@ -55,7 +57,38 @@ const tabItems = [
   { key: 'me', text: '我的', icon: meIcon, activeIcon: meActiveIcon }
 ];
 
-const LazyPublishPage = lazy(() => import('./pages/PublishPage.jsx'));
+let campusMapImagePreloadPromise;
+
+function preloadCampusMapImage() {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (campusMapImagePreloadPromise) return campusMapImagePreloadPromise;
+
+  const absoluteHref = new URL(campusMapImage, window.location.href).href;
+  const existingLink = Array.from(document.querySelectorAll('link[rel="preload"][as="image"]'))
+    .some((link) => link.href === absoluteHref);
+  if (!existingLink) {
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.as = 'image';
+    link.href = absoluteHref;
+    document.head.appendChild(link);
+  }
+
+  campusMapImagePreloadPromise = new Promise((resolve) => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.fetchPriority = 'high';
+    image.onload = () => resolve();
+    image.onerror = () => resolve();
+    image.src = campusMapImage;
+    if (image.decode) image.decode().then(resolve, resolve);
+  });
+  return campusMapImagePreloadPromise;
+}
+
+function preloadPublishResources() {
+  return preloadCampusMapImage();
+}
 
 const SCHOOL_EMAIL_DOMAIN = 'shanghaitech.edu.cn';
 const EMAIL_CODE_COOLDOWN_SECONDS = 30;
@@ -283,6 +316,10 @@ function App() {
   const [showPwaGuide, setShowPwaGuide] = useState(false);
   const viewRef = useRef(view);
   const currentClientId = useMemo(() => getClientId(), []);
+
+  useEffect(() => {
+    preloadPublishResources();
+  }, []);
 
   useEffect(() => {
     saveItems(items);
@@ -527,11 +564,15 @@ function App() {
   }
 
   function openPublish(type = 'found') {
+    const nextView = type === 'lost' ? 'publish-lost' : 'publish-found';
+    const publishResources = preloadPublishResources();
     requireAuth(type === 'lost' ? '发布寻物' : '发布招领', () => {
-      setSelectedId(null);
-      setDetailReturnTarget(null);
-      setPublishDraft(null);
-      setView(type === 'lost' ? 'publish-lost' : 'publish-found');
+      publishResources.finally(() => {
+        setSelectedId(null);
+        setDetailReturnTarget(null);
+        setPublishDraft(null);
+        setView(nextView);
+      });
     });
   }
 
@@ -1044,17 +1085,15 @@ function App() {
       )}
 
       {view.startsWith('publish') && (
-        <Suspense fallback={<section className="page publish-page"><div className="empty">发布页加载中</div></section>}>
-          <LazyPublishPage
-            initialType={view === 'publish-lost' ? 'lost' : 'found'}
-            initialDraft={publishDraft}
-            items={items}
-            currentUser={currentUser}
-            onCancel={() => openTab(view === 'publish-lost' ? 'lost' : 'found')}
-            onSubmit={publishItem}
-            onOpenMatch={openMatchDetailFromPublish}
-          />
-        </Suspense>
+        <PublishPage
+          initialType={view === 'publish-lost' ? 'lost' : 'found'}
+          initialDraft={publishDraft}
+          items={items}
+          currentUser={currentUser}
+          onCancel={() => openTab(view === 'publish-lost' ? 'lost' : 'found')}
+          onSubmit={publishItem}
+          onOpenMatch={openMatchDetailFromPublish}
+        />
       )}
 
       {view === 'privacy-search' && (

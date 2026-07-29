@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { campusMapMeta, locationAliases, locations } from '../data.js';
 import { compressLocationImageFile } from '../imageCompression.js';
@@ -6,9 +6,9 @@ import { sanitizeFoundItemPrivacy } from '../privacy.js';
 import { classifyByText, findPotentialMatches, getLocation } from '../utils.js';
 import { recognizeImageFile } from '../vision.js';
 import CategoryBar from '../components/CategoryBar.jsx';
+import CampusLocationMap from '../components/CampusLocationMap.jsx';
 import SensitivityBadge from '../components/SensitivityBadge.jsx';
 
-const LazyCampusLocationMap = lazy(() => import('../components/CampusLocationMap.jsx'));
 const LOCATION_DETAIL_HINT = '可补充入口、楼层、靠窗/靠路侧、附近标志物等细节。';
 
 function locationImageHint(location) {
@@ -413,9 +413,7 @@ export default function PublishPage({ initialType, initialDraft, items, currentU
                 <option key={location.id} value={location.id}>{location.name}</option>
               ))}
             </select>
-            <Suspense fallback={<div className="campus-map-shell campus-map-loading" role="status">地图加载中</div>}>
-              <LazyCampusLocationMap selectedId={form.locationId} onSelect={selectLocation} />
-            </Suspense>
+            <CampusLocationMap selectedId={form.locationId} onSelect={selectLocation} />
             <div className="location-confirm">
               <div className="location-confirm-row">
                 <span>已选择：</span>
