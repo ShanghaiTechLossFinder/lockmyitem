@@ -3,9 +3,9 @@ import cardImage from './assets/items/card.jpg';
 import earbudsImage from './assets/items/earbuds.jpg';
 import keysImage from './assets/items/keys.jpg';
 import notebookImage from './assets/items/notebook.jpg';
-import { campusMapImage, campusMapImageBoundaries, campusMapLocations, campusMapMeta, campusMapOutline, locationAliases } from './campusMapData.js';
+import { campusMapLocations, campusMapMeta, locationAliases } from './campusLocationData.js';
 
-export { campusMapImage, campusMapImageBoundaries, campusMapMeta, campusMapOutline, locationAliases };
+export { campusMapMeta, locationAliases };
 
 export const categories = ['全部', '证件', '电子产品', '书本资料', '衣物', '钥匙', '校园卡', '雨伞', '水杯', '其他'];
 

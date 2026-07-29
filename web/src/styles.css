@@ -2775,6 +2775,13 @@ p {
   aspect-ratio: 2125 / 1363;
 }
 
+.campus-map-loading {
+  display: grid;
+  place-items: center;
+  color: #58736c;
+  font-weight: 700;
+}
+
 .campus-map {
   display: block;
   width: 100%;

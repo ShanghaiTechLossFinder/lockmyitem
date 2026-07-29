@@ -12,13 +12,13 @@
   },
   "dependencies": {
     "@cloudbase/js-sdk": "^3.6.2",
-    "@vitejs/plugin-react": "^5.0.4",
     "lucide-react": "^0.468.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "vite": "^7.1.9"
+    "react-dom": "^19.1.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1"
+    "@playwright/test": "^1.61.1",
+    "@vitejs/plugin-react": "^5.0.4",
+    "vite": "^7.1.9"
   }
 }
