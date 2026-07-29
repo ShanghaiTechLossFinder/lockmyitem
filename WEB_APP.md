@@ -25,6 +25,8 @@ npm run build
 
 构建产物会生成在 `web/dist/`，可以部署到静态网站服务，例如 Vercel、Netlify、GitHub Pages、腾讯云静态网站托管或任意 Nginx。
 
+`lockmyitem.asia` 的 GitHub Pages 源分支为 `gh-pages:/`。发布流程应使用最新 `web/dist/` 全量刷新 `gh-pages` 根目录；`qq-pages` 不是必需分支，迁移完成后不再作为发布入口。
+
 ## 网页端混元图像识别
 
 网页端必须通过服务端调用混元大模型，不能把模型服务凭据写进浏览器代码。当前前端优先调用 CloudBase `lostfound` 云函数：
@@ -49,13 +51,13 @@ VITE_TCB_REGION=ap-shanghai
 
 云函数会在服务端读取模型服务凭据，再调用腾讯混元视觉模型。上线前需要在 CloudBase 控制台开启 Web 端可调用云函数的权限，并按腾讯 CloudBase Web SDK 要求配置对应权限策略。
 
-如果不走 CloudBase，也可以部署 `web/api/classify-image.js` 作为独立后端代理，前端会读取：
+如果不走 CloudBase，也可以部署 `web/api/classify-image.js` 作为独立后端代理。这个接口是兼容 fallback，不是 lockmyitem.asia 的主线路径；前端只有在显式开启 fallback 后才会读取：
 
 ```bash
 VITE_MODEL_API_URL=https://你的后端域名/api/classify-image
 ```
 
-`web/api/classify-image.js` 提供了一个 Vercel 风格的服务端接口模板。服务端凭据、代理访问凭据和来源白名单必须通过部署平台 secret storage 配置，不写入仓库。
+`web/api/classify-image.js` 提供了一个 Vercel 风格的服务端接口模板。服务端凭据、代理访问凭据、来源白名单、限流和图片大小限制必须通过部署平台 secret storage 或平台配置完成，不写入仓库。
 
 部署后，图片上传会调用该接口，再由服务端调用腾讯混元视觉模型返回分类、标签和物品描述。网页不会再使用浏览器本地模型伪装成自动识别。
 
@@ -68,7 +70,7 @@ VITE_MODEL_API_URL=https://你的后端域名/api/classify-image
    - 开启匿名登录，让前端用匿名身份调用云函数。
    - 配置 Web Publishable 权限并在部署平台 secret storage 中设置对应凭据。
 5. 将 `https://lockmyitem.asia` 加入 CloudBase Web 安全来源或允许来源。
-6. 构建并部署网页端：
+6. 构建并部署网页端。发布主图会在浏览器端压缩到固定上限内，避免 CloudBase 云函数因请求体过大拒绝：
 
 ```bash
 cd web

@@ -1,4 +1,5 @@
 import { cloudbaseConfigured, cloudbaseFunctionName, getCloudbaseApp } from './cloudbaseClient.js';
+import { compressMainImageFile } from './imageCompression.js';
 import { sanitizeFoundItemPrivacy } from './privacy.js';
 
 const TCB_ENABLED = import.meta.env.VITE_DISABLE_TCB_HUNYUAN !== 'true' && cloudbaseConfigured;
@@ -35,36 +36,6 @@ function normalizeRemoteData(raw = {}) {
     modelSources: payload.modelSources || {},
     rawPredictions: payload.rawPredictions || []
   };
-}
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function imageFromDataUrl(dataUrl) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = reject;
-    image.src = dataUrl;
-  });
-}
-
-function compressDataUrl(dataUrl, maxSize = 1280, quality = 0.78) {
-  return imageFromDataUrl(dataUrl).then((image) => {
-    const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const context = canvas.getContext('2d');
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', quality);
-  });
 }
 
 function endpointRequiredMessage() {
@@ -207,8 +178,7 @@ async function classifyViaHunyuan(imageDataUrl, hint, options = {}) {
 }
 
 export async function recognizeImageFile(file, hint = '', options = {}) {
-  const dataUrl = await fileToDataUrl(file);
-  const compressed = await compressDataUrl(dataUrl, 960, 0.72);
+  const compressed = await compressMainImageFile(file);
   const textHint = `${hint || ''} ${file?.name || ''}`.trim();
   const errors = [];
   let data = null;

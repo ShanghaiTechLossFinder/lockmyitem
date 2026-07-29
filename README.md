@@ -45,6 +45,8 @@ npm run build
 
 构建产物输出到 `web/dist/`，可部署到 GitHub Pages、Vercel、Netlify、腾讯云静态网站托管或任意静态站点服务。
 
+`lockmyitem.asia` 的 GitHub Pages 发布源固定为 `gh-pages:/`。`main` 只存源码和配置；部署时用当前 `web/dist/` 全量刷新 `gh-pages` 根目录，并清除旧 hash 资源。历史 `qq-pages` 分支不是必需发布源，迁移完成后不再保留。
+
 ## CloudBase 配置
 
 web 前端通过 CloudBase Web SDK 调用 `lostfound` 云函数。公开仓库只保留非敏感运行配置；所有凭据、邮件账号、模型服务凭据和签名密钥都必须只放在 CloudBase 控制台或部署平台环境变量里。
@@ -94,7 +96,8 @@ CloudBase 环境需要以下集合：
 ## 隐私和安全边界
 
 - 浏览器端不保存模型服务凭据、云服务签名凭据、邮件密码或服务端 token。
-- 图片识别通过 CloudBase 云函数或受保护的后端代理调用模型。
+- 图片识别通过 CloudBase 云函数调用模型；`web/api/classify-image.js` 仅作为非主线兼容 fallback，只有在显式配置 `VITE_ENABLE_MODEL_API_FALLBACK=true` 和 `VITE_MODEL_API_URL` 后才启用。
+- 浏览器发布前会把主图压缩到固定 payload 上限内；方位图片只保留本地预览，不直连写 CloudBase 存储。
 - 招领文本中的完整卡号、证件号、手机号会自动打码；证件、校园卡、钱包、手机、AirPods/耳机、电脑、钥匙等敏感或重要招领物品在认领前隐藏原图。
 - 受保护物品的认领描述由后端调用混元模型核验；未自动通过时聚合通知发布者。发布者批准后只授予认领者查看权，还需认领者再次确认才标记完成。
 - 发布地点来自用户手动点选、地点搜索或手动输入，不依赖浏览器定位权限。
