@@ -70,7 +70,7 @@ VITE_MODEL_API_URL=https://你的后端域名/api/classify-image
    - 开启匿名登录，让前端用匿名身份调用云函数。
    - 配置 Web Publishable 权限并在部署平台 secret storage 中设置对应凭据。
 5. 将 `https://lockmyitem.asia` 加入 CloudBase Web 安全来源或允许来源。
-6. 构建并部署网页端。发布主图会在浏览器端压缩到固定上限内，避免 CloudBase 云函数因请求体过大拒绝：
+6. 构建并部署网页端。发布主图会在浏览器端使用旧识别策略压缩，避免过度压缩影响识别质量：
 
 ```bash
 cd web

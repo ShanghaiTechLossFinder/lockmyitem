@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { campusMapMeta, locationAliases, locations } from '../data.js';
-import { compressLocationImageFile, dataUrlByteLength, MAIN_IMAGE_MAX_DATA_URL_BYTES } from '../imageCompression.js';
+import { compressLocationImageFile } from '../imageCompression.js';
 import { sanitizeFoundItemPrivacy } from '../privacy.js';
 import { classifyByText, findPotentialMatches, getLocation } from '../utils.js';
 import { recognizeImageFile } from '../vision.js';
@@ -10,7 +10,6 @@ import SensitivityBadge from '../components/SensitivityBadge.jsx';
 
 const LazyCampusLocationMap = lazy(() => import('../components/CampusLocationMap.jsx'));
 const LOCATION_DETAIL_HINT = '可补充入口、楼层、靠窗/靠路侧、附近标志物等细节。';
-const IMAGE_TOO_LARGE_MESSAGE = '图片过大，请换一张或先裁剪/压缩';
 
 function locationImageHint(location) {
   return [
@@ -120,11 +119,6 @@ function suggestedTitle(data = {}) {
     .slice(0, 3)
     .join('');
   return title || data.category || '';
-}
-
-function hasOversizedMainImage(form) {
-  return String(form.image || '').startsWith('data:')
-    && dataUrlByteLength(form.image) > MAIN_IMAGE_MAX_DATA_URL_BYTES;
 }
 
 export default function PublishPage({ initialType, initialDraft, items, currentUser, onCancel, onSubmit, onOpenMatch }) {
@@ -291,11 +285,6 @@ export default function PublishPage({ initialType, initialDraft, items, currentU
   async function submit(event) {
     event.preventDefault();
     if (submitting || !hasSelectedLocation) return;
-    if (hasOversizedMainImage(form)) {
-      setModelError(IMAGE_TOO_LARGE_MESSAGE);
-      setAiProcessStage('error');
-      return;
-    }
     const safeForm = sanitizeFoundItemPrivacy(form);
     const masked = safeForm.type === 'found' && (
       safeForm.title !== form.title

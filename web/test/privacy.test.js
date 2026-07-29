@@ -15,7 +15,7 @@ test('web privacy policy protects only cards and identity documents', () => {
   }
 });
 
-test('web policy protects important valuables', () => {
+test('web policy marks important valuables without locking public images', () => {
   for (const sample of [
     { title: '钱包', category: '其他' },
     { title: 'AirPods', category: '电子产品' },
@@ -26,7 +26,7 @@ test('web policy protects important valuables', () => {
   ]) {
     const item = sanitizeFoundItemPrivacy({ type: 'found', ...sample, sensitivityLevel: 'important' });
     assert.equal(item.sensitivityLevel, 'important', sample.title);
-    assert.equal(isProtectedFoundItem(item), true, sample.title);
+    assert.equal(isProtectedFoundItem(item), false, sample.title);
     assert.equal(sensitivityBadgeText(item), '重要物品', sample.title);
   }
 });
@@ -47,5 +47,5 @@ test('unified privacy search routes cards and documents without affecting valuab
   const phone = sanitizeFoundItemPrivacy({ type: 'found', title: '手机', category: '电子产品' });
   assert.equal(isSensitiveFoundItem(document), true);
   assert.equal(isSensitiveFoundItem(phone), false);
-  assert.equal(isProtectedFoundItem(phone), true);
+  assert.equal(isProtectedFoundItem(phone), false);
 });

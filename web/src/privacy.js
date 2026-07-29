@@ -78,8 +78,7 @@ const PROTECTED_VISUAL_WORDS = [
   '校园卡',
   '一卡通',
   '饭卡',
-  '门禁卡',
-  ...IMPORTANT_WORDS
+  '门禁卡'
 ];
 const SENSITIVE_PLACEHOLDER_LABEL_PATTERN = '(?:身份证号|手机号|证件号|编号|姓名|卡号)';
 const LEGACY_PLACEHOLDER_SUFFIX = [0x5df2, 0x9690, 0x85cf].map((code) => String.fromCharCode(code)).join('');
@@ -256,7 +255,7 @@ export function sanitizeFoundItemPrivacy(item = {}) {
 export function isProtectedFoundItem(item = {}) {
   if (!isFoundItem(item)) return false;
   const level = String(item.sensitivityLevel || '').trim().toLowerCase();
-  return level === 'sensitive' || level === 'important' || hasProtectedVisualSurface(item);
+  return level === 'sensitive' || hasProtectedVisualSurface(item);
 }
 
 export function isSensitiveFoundItem(item = {}) {

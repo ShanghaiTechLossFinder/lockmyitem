@@ -33,10 +33,10 @@ for (const sample of [
   { category: '其他', title: '黑色钱包' },
   { category: '电子产品', title: '旧重要耳机', sensitivityLevel: 'important', sensitivityReasons: ['贵重物品'] }
 ]) {
-  test(`important valuables are image-protected: ${sample.title}`, () => {
+  test(`important valuables stay public but tagged: ${sample.title}`, () => {
     const item = sanitizeFoundItemPrivacy({ ...sample, type: 'found' });
     assert.equal(item.sensitivityLevel, 'important');
-    assert.equal(isProtectedFoundItem(item), true);
+    assert.equal(isProtectedFoundItem(item), false);
   });
 }
 

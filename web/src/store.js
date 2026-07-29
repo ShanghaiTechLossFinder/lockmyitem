@@ -6,7 +6,6 @@ import { classifyByText, getLocation } from './utils.js';
 const STORAGE_KEY = 'shanghaitech_lostfound_web_v1';
 const AUTH_KEY = 'shanghaitech_lostfound_web_user_v1';
 const CLIENT_ID_KEY = 'lockmyitem_web_client_id';
-const CLOUD_FUNCTION_SAFE_PAYLOAD_BYTES = 5_000_000;
 
 const TCB_DATA_ENABLED = import.meta.env.VITE_DISABLE_TCB_DATA !== 'true' && cloudbaseConfigured;
 
@@ -82,19 +81,6 @@ function readableError(error, fallback = '云端调用失败') {
   }
   const text = String(error || '');
   return text && text !== '[object Object]' ? text : fallback;
-}
-
-function jsonByteLength(value) {
-  const json = JSON.stringify(value);
-  if (typeof TextEncoder !== 'undefined') {
-    return new TextEncoder().encode(json).length;
-  }
-  return json.length;
-}
-
-function assertCloudFunctionPayloadSize(data) {
-  if (jsonByteLength(data) <= CLOUD_FUNCTION_SAFE_PAYLOAD_BYTES) return;
-  throw new Error('图片过大，请换一张或先裁剪/压缩');
 }
 
 export function getClientId() {
@@ -413,7 +399,6 @@ export function createItem(payload) {
 
 export async function createCloudItem(payload, currentUser) {
   const request = { payload: buildItemPayload(payload, currentUser) };
-  assertCloudFunctionPayloadSize(request);
   const data = await callLostfound('createItem', request, 20000);
   return normalizeItem(data);
 }
@@ -508,7 +493,7 @@ export async function setCloudReturnStatus(itemId, returned) {
 export function cloudErrorMessage(error) {
   const message = readableError(error);
   if (/EXCEED_MAX_PAYLOAD_SIZE|exceed max payload size|payload size/i.test(message)) {
-    return '图片过大，请换一张或先裁剪/压缩';
+    return '图片达到 CloudBase 平台请求体限制，请先裁剪或压缩后再发布';
   }
   return message;
 }
