@@ -2207,6 +2207,14 @@ p {
   font-weight: 900;
 }
 
+.auth-note {
+  margin-top: 9px;
+  color: #7B8584;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .pwa-backdrop {
   position: fixed;
   inset: 0;

@@ -35,6 +35,3 @@ Thumbs.db
 # Local Codex workspace files
 .agents/
 skills-lock.json
-
-# Locked local — never push
-posters/
