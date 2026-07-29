@@ -61,6 +61,21 @@ function resolveQQReviewOwner({ actorId = '', email = '', emailDomain = 'shangha
   };
 }
 
+function csvValues(value = '') {
+  return String(value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function resolveQQAllowedGroupIds(env = {}) {
+  const legacyReviewGroupIds = csvValues(env.QQ_REVIEW_GROUP_IDS);
+  const allowedGroupIds = legacyReviewGroupIds.length
+    ? legacyReviewGroupIds
+    : csvValues(env.QQ_ALLOWED_GROUP_IDS);
+  return new Set(allowedGroupIds);
+}
+
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -137,6 +152,7 @@ module.exports = {
   normalizeQQExtraction,
   qqReplyDeadlineMs,
   qqReplyMessageId,
+  resolveQQAllowedGroupIds,
   resolveQQReviewOwner,
   qqSignatureMessage,
   routeQQExtraction,

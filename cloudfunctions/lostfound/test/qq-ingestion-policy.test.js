@@ -9,6 +9,7 @@ const {
   normalizeQQExtraction,
   qqReplyDeadlineMs,
   qqReplyMessageId,
+  resolveQQAllowedGroupIds,
   resolveQQReviewOwner,
   qqSignatureMessage,
   routeQQExtraction,
@@ -127,4 +128,21 @@ test('QQ review owner can be derived from the unified email before registration'
     email: '',
     derivedActorId: ''
   });
+});
+
+test('QQ allowed groups use configured production review groups first', () => {
+  assert.deepEqual(
+    [...resolveQQAllowedGroupIds({
+      QQ_ALLOWED_GROUP_IDS: 'history-import',
+      QQ_REVIEW_GROUP_IDS: '731332881'
+    })],
+    ['731332881']
+  );
+});
+
+test('QQ allowed groups fall back to official allowed group variable', () => {
+  assert.deepEqual(
+    [...resolveQQAllowedGroupIds({ QQ_ALLOWED_GROUP_IDS: '731332881, 123456' })],
+    ['731332881', '123456']
+  );
 });
