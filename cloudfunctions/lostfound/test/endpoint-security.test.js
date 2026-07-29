@@ -189,6 +189,49 @@ function loadHandler(database) {
   }
 }
 
+test('listItems resolves list preview image URLs before stripping internal file IDs', async () => {
+  const database = new FakeDatabase({
+    items: {
+      foundPublic: {
+        _id: 'foundPublic',
+        type: 'found',
+        status: 'active',
+        category: '雨伞',
+        title: '黑色雨伞',
+        imageFileIds: ['cloud://private/found-umbrella.jpg'],
+        createdAt: new Date('2026-07-01T10:00:00.000Z')
+      },
+      lostPublic: {
+        _id: 'lostPublic',
+        type: 'lost',
+        status: 'active',
+        category: '书本资料',
+        title: '寻找笔记本',
+        imageFileIds: ['cloud://private/lost-notebook.jpg'],
+        createdAt: new Date('2026-07-01T09:00:00.000Z')
+      }
+    }
+  });
+  const handler = loadHandler(database);
+
+  const response = await handler({
+    action: 'listItems',
+    filters: { status: 'active', limit: 20 },
+    authToken: authToken('viewer')
+  });
+
+  assert.equal(response.ok, true);
+  const itemsById = Object.fromEntries(response.data.items.map((item) => [item._id, item]));
+  for (const item of [itemsById.foundPublic, itemsById.lostPublic]) {
+    assert.ok(item, 'expected item in list response');
+    assert.equal(item.claimImageLocked, false);
+    assert.equal('imageFileIds' in item, false);
+    assert.equal(item.imageUrls.length, 1);
+    assert.equal(item.thumbUrl, item.imageUrls[0]);
+    assert.match(item.thumbUrl, /^https:\/\/temporary\.example\/cloud%3A%2F%2Fprivate%2F/);
+  }
+});
+
 test('handler enforces image redaction, claimant privacy, and two-stage claim completion', async () => {
   const database = new FakeDatabase({
     items: {

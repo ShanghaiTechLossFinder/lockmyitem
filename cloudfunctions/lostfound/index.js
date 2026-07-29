@@ -3228,10 +3228,10 @@ async function listItems(event) {
     .skip(filters.cursor || 0)
     .limit(filters.limit || 20)
     .get();
-  const visibleItems = (result.data || [])
-    .map((item) => sanitizeItemForViewer(item, event, actorId));
-  const items = await hydrateItemImages(visibleItems);
-  return ok({ items, nextCursor: (filters.cursor || 0) + result.data.length });
+  const rawItems = result.data || [];
+  const hydratedItems = await hydrateItemImages(rawItems);
+  const items = hydratedItems.map((item) => sanitizeItemForViewer(item, event, actorId));
+  return ok({ items, nextCursor: (filters.cursor || 0) + rawItems.length });
 }
 
 async function getItemDetail(event) {
