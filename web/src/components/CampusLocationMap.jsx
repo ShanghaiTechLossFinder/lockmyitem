@@ -1,4 +1,4 @@
-import campusMapImage from '../assets/map/shanghaitech-campus-map-3d.png';
+import campusMapImage from '../assets/map/shanghaitech-campus-map-3d.jpg';
 import { campusMapImageBoundaries, campusMapLocations, campusMapMeta } from '../campusMapData.js';
 
 const CAMPUS_MAP_VIEW_WIDTH = campusMapMeta.imageCalibration?.imageWidth || 100;
