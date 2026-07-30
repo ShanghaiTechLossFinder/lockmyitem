@@ -35,3 +35,6 @@ Thumbs.db
 # Local Codex workspace files
 .agents/
 skills-lock.json
+
+# Local report materials — never push
+materials 4 report/
