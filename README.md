@@ -43,9 +43,9 @@ cd web
 npm run build
 ```
 
-构建产物输出到 `web/dist/`，可部署到 GitHub Pages、Vercel、Netlify、腾讯云静态网站托管或任意静态站点服务。
+构建产物输出到 `web/dist/`。`lockmyitem.asia` 当前部署到阿里云中国内地 ECS，构建产物通过独立只读 Caddy 容器从 `/srv/lockmyitem/current` 提供，并由现有入口 Caddy 接入；可复用配置见 `deploy/`。
 
-`lockmyitem.asia` 的 GitHub Pages 发布源固定为 `gh-pages:/`。`main` 只存源码和配置；部署时用当前 `web/dist/` 全量刷新 `gh-pages` 根目录，并清除旧 hash 资源。历史 `qq-pages` 分支不是必需发布源，迁移完成后不再保留。
+`main` 只存源码和配置。`gh-pages:/` 保留为迁移期间的回滚版本，不再作为 `lockmyitem.asia` 的生产解析目标；历史 `qq-pages` 分支不作为发布入口。
 
 ## CloudBase 配置
 

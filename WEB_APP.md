@@ -23,9 +23,9 @@ cd web
 npm run build
 ```
 
-构建产物会生成在 `web/dist/`，可以部署到静态网站服务，例如 Vercel、Netlify、GitHub Pages、腾讯云静态网站托管或任意 Nginx。
+构建产物会生成在 `web/dist/`。`lockmyitem.asia` 当前部署到阿里云中国内地 ECS，构建产物通过独立只读 Caddy 容器从 `/srv/lockmyitem/current` 提供，并由现有入口 Caddy 接入；可复用配置见 `deploy/`。
 
-`lockmyitem.asia` 的 GitHub Pages 源分支为 `gh-pages:/`。发布流程应使用最新 `web/dist/` 全量刷新 `gh-pages` 根目录；`qq-pages` 不是必需分支，迁移完成后不再作为发布入口。
+`gh-pages:/` 保留为迁移期间的回滚版本，不再作为 `lockmyitem.asia` 的生产解析目标；`qq-pages` 不作为发布入口。
 
 ## 网页端混元图像识别
 

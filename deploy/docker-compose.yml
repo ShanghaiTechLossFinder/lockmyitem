@@ -1,0 +1,16 @@
+services:
+  static:
+    image: caddy:2.8-alpine
+    container_name: lockmyitem-static
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    restart: unless-stopped
+    volumes:
+      - ./current:/srv:ro
+      - ./static.Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - xiangban
+
+networks:
+  xiangban:
+    external: true
+    name: xiangban_default

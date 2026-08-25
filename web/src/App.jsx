@@ -91,6 +91,7 @@ function preloadPublishResources() {
 }
 
 const SCHOOL_EMAIL_DOMAIN = 'shanghaitech.edu.cn';
+const ICP_FILING_NUMBER = '沪ICP备2026033892号-1';
 const EMAIL_CODE_COOLDOWN_SECONDS = 30;
 const VIEW_STORAGE_KEY = 'lockmyitem_web_last_view';
 const SAVED_VIEWS = ['found', 'lost', 'returned', 'me'];
@@ -1130,6 +1131,7 @@ function App() {
       )}
 
       {syncing && <div className="sync-chip" role="status">同步中</div>}
+      <ComplianceFooter withTabBar={showTabBar} />
       {showTabBar && (
         <TabBar
           view={view}
@@ -2295,6 +2297,16 @@ function TabBar({ view, onChange, onPublish }) {
       </button>
       {lastItems.map(renderTab)}
     </nav>
+  );
+}
+
+function ComplianceFooter({ withTabBar = false }) {
+  return (
+    <footer className={`compliance-footer ${withTabBar ? 'with-tab-bar' : ''}`.trim()}>
+      <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">
+        {ICP_FILING_NUMBER}
+      </a>
+    </footer>
   );
 }
 

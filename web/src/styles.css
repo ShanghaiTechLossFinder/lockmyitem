@@ -1937,6 +1937,31 @@ p {
   letter-spacing: 0;
 }
 
+.compliance-footer {
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px 24px;
+  background: var(--cream);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.compliance-footer.with-tab-bar {
+  padding-bottom: calc(86px + env(safe-area-inset-bottom));
+}
+
+.compliance-footer a {
+  color: #667085;
+  text-decoration: none;
+}
+
+.compliance-footer a:hover,
+.compliance-footer a:focus-visible {
+  color: var(--green);
+  text-decoration: underline;
+}
+
 .toast {
   position: fixed;
   right: 16px;
